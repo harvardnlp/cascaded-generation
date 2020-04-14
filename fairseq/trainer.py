@@ -459,7 +459,7 @@ class Trainer(object):
         return logging_output
 
     @metrics.aggregate("valid")
-    def valid_step(self, sample, raise_oom=False):
+    def valid_step(self, sample, raise_oom=False, ngram=None):
         """Do forward pass in evaluation mode."""
         if self._dummy_batch == "DUMMY":
             self._dummy_batch = sample
@@ -477,7 +477,7 @@ class Trainer(object):
 
             try:
                 _loss, sample_size, logging_output = self.task.valid_step(
-                    sample, self.model, self.criterion
+                    sample, self.model, self.criterion, ngram=ngram
                 )
             except RuntimeError as e:
                 if "out of memory" in str(e):

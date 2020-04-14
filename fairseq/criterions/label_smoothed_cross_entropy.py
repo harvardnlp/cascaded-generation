@@ -45,7 +45,7 @@ class LabelSmoothedCrossEntropyCriterion(FairseqCriterion):
                             help='epsilon for label smoothing, 0 means no label smoothing')
         # fmt: on
 
-    def forward(self, model, sample, reduce=True):
+    def forward(self, model, sample, reduce=True, ngram=None):
         """Compute the loss for the given sample.
 
         Returns a tuple with three elements:
@@ -53,7 +53,11 @@ class LabelSmoothedCrossEntropyCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        net_output = model(**sample['net_input'])
+        #import pdb; pdb.set_trace()
+        net_output = model(**sample['net_input'], ngram=ngram)
+        #ids_ = model.decoder.ids_
+        #if ids_ is not None:
+        #    sample['target'][ids_.eq(0)] = self.padding_idx
         loss, nll_loss = self.compute_loss(model, net_output, sample, reduce=reduce)
         sample_size = sample['target'].size(0) if self.sentence_avg else sample['ntokens']
         logging_output = {

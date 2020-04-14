@@ -74,7 +74,7 @@ class TransformerEncoderLayer(nn.Module):
                     state_dict["{}.{}.{}".format(name, new, m)] = state_dict[k]
                     del state_dict[k]
 
-    def forward(self, x, encoder_padding_mask, attn_mask: Optional[Tensor] = None):
+    def forward(self, x, encoder_padding_mask, ngram: Optional[int] = None, attn_mask: Optional[Tensor] = None):
         """
         Args:
             x (Tensor): input to the layer of shape `(seq_len, batch, embed_dim)`
@@ -102,13 +102,18 @@ class TransformerEncoderLayer(nn.Module):
         # will become -inf, which results in NaN in model parameters
         # TODO: to formally solve this problem, we need to change fairseq's
         # MultiheadAttention. We will do this later on.
+        if x.ne(x).any():
+            import pdb; pdb.set_trace()
         x, _ = self.self_attn(
             query=x,
             key=x,
             value=x,
             key_padding_mask=encoder_padding_mask,
             attn_mask=attn_mask,
+            ngram=ngram,
         )
+        if x.ne(x).any():
+            import pdb; pdb.set_trace()
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
         if not self.normalize_before:
@@ -229,6 +234,10 @@ class TransformerDecoderLayer(nn.Module):
         self_attn_padding_mask: Optional[torch.Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
+        ngram: Optional[int] = None,
+        is_translate: Optional[bool] = False,
+        is_cascade: Optional[bool] = False,
+        offset: Optional[torch.Tensor] = None,
     ):
         """
         Args:
@@ -292,6 +301,10 @@ class TransformerDecoderLayer(nn.Module):
             incremental_state=incremental_state,
             need_weights=False,
             attn_mask=self_attn_mask,
+            ngram=ngram,
+            is_translate=is_translate,
+            is_cascade=is_cascade,
+            offset=offset,
         )
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x

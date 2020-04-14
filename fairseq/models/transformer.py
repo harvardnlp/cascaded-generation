@@ -250,6 +250,7 @@ class TransformerModel(FairseqEncoderDecoderModel):
         features_only: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
+        ngram: Optional[int] = None,
     ):
         """
         Run the forward pass for an encoder-decoder model.
@@ -271,6 +272,7 @@ class TransformerModel(FairseqEncoderDecoderModel):
             alignment_heads=alignment_heads,
             src_lengths=src_lengths,
             return_all_hiddens=return_all_hiddens,
+            ngram=ngram,
         )
         return decoder_out
 
@@ -335,13 +337,16 @@ class TransformerAlignModel(TransformerModel):
         encoder_out=None,
         incremental_state=None,
         features_only=False,
+        ngram=None,
+        is_translate=False,
+        is_cascade=False,
         **extra_args,
     ):
         attn_args = {
             "alignment_layer": self.alignment_layer,
             "alignment_heads": self.alignment_heads,
         }
-        decoder_out = self.decoder(prev_output_tokens, encoder_out, **attn_args)
+        decoder_out = self.decoder(prev_output_tokens, encoder_out, ngram=ngram, is_translate=is_translate, is_cascade=is_cascade, **attn_args)
 
         if self.full_context_alignment:
             attn_args["full_context_alignment"] = self.full_context_alignment
@@ -697,6 +702,10 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         features_only: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
+        ngram: Optional[int] = None,
+        is_translate: Optional[bool] = False,
+        is_cascade: Optional[bool] = False,
+        position: Optional[Tensor] = None,
         src_lengths: Optional[Any] = None,
         return_all_hiddens: bool = False,
     ):
@@ -722,6 +731,10 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             incremental_state=incremental_state,
             alignment_layer=alignment_layer,
             alignment_heads=alignment_heads,
+            ngram=ngram,
+            is_translate=is_translate,
+            is_cascade=is_cascade,
+            position=position,
         )
         if not features_only:
             x = self.output_layer(x)
@@ -735,7 +748,42 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         full_context_alignment: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
+        ngram: Optional[int] = None,
+        is_translate: Optional[bool] = False,
+        is_cascade: Optional[bool] = False,
+        position: Optional[Tensor] = None,
     ):
+        #import pdb; pdb.set_trace()
+        bos = 0
+        bsz = prev_output_tokens.size(0)
+        tgt_length = prev_output_tokens.size(1)
+        prev_output_tokens = prev_output_tokens.data.clone()
+        #self.ids_ = None
+        if is_cascade:
+            offset = None
+        elif self.training:
+            NGRAM = 5
+            offset = torch.randint(0, NGRAM, (bsz,)).to(prev_output_tokens.device).view(bsz, 1)
+            ids = torch.arange(tgt_length).view(1, -1).expand(bsz, -1).to(prev_output_tokens.device) # bsz, tgt_length
+            ids = ids + NGRAM - offset # bsz, tgt_length
+            ids = ids.fmod(NGRAM)
+            #self.ids_ = ids.data.clone()
+            #self.ids_[:, 0] = 1
+            prev_output_tokens[ids.eq(0)] = bos
+            offset = offset.view(bsz, 1, 1).contiguous()
+        elif is_translate:
+            offset = None
+            #import pdb; pdb.set_trace()
+            if ngram+1 <= prev_output_tokens.size(1):
+                prev_output_tokens[:, -(ngram+1)] = bos
+        else:
+            offset = None
+            NGRAM = ngram + 1
+            ids = torch.arange(tgt_length).view(1, -1).expand(bsz, -1).to(prev_output_tokens.device) # bsz, tgt_length
+            ids = ids + NGRAM # bsz, tgt_length
+            ids = ids.fmod(NGRAM)
+            prev_output_tokens[ids.eq(0)] = bos
+
         """
         Similar to *forward* but only return features.
 
@@ -761,7 +809,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         # embed positions
         positions = (
             self.embed_positions(
-                prev_output_tokens, incremental_state=incremental_state
+                prev_output_tokens, incremental_state=incremental_state, position=position,
             )
             if self.embed_positions is not None
             else None
@@ -806,6 +854,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 else:
                     encoder_state = encoder_out.encoder_out
 
+            #import pdb; pdb.set_trace()
             if incremental_state is None and not full_context_alignment:
                 self_attn_mask = self.buffered_future_mask(x)
             else:
@@ -814,6 +863,10 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             # add LayerDrop (see https://arxiv.org/abs/1909.11556 for description)
             dropout_probability = torch.empty(1).uniform_()
             if not self.training or (dropout_probability > self.decoder_layerdrop):
+                #if is_translate and idx == 1:
+                #    import pdb; pdb.set_trace()
+                #import pdb; pdb.set_trace()
+                #print ('there')
                 x, layer_attn, _ = layer(
                     x,
                     encoder_state,
@@ -825,10 +878,19 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                     self_attn_padding_mask=self_attn_padding_mask,
                     need_attn=bool((idx == alignment_layer)),
                     need_head_weights=bool((idx == alignment_layer)),
+                    ngram=ngram,
+                    is_translate=is_translate,
+                    is_cascade=is_cascade,
+                    offset=offset,
                 )
+                if x[-1].ne(x[-1]).any():
+                    import pdb; pdb.set_trace()
+                    print (idx)
                 inner_states.append(x)
                 if layer_attn is not None and idx == alignment_layer:
                     attn = layer_attn.float().to(x)
+            #import pdb; pdb.set_trace()
+            #print ('here')
 
         if attn is not None:
             if alignment_heads is not None:

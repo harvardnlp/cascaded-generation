@@ -78,6 +78,7 @@ class MultiheadAttention(nn.Module):
             self.enable_torch_version = True
         else:
             self.enable_torch_version = False
+        self.enable_torch_version = False
 
     def prepare_for_onnx_export_(self):
         self.onnx_trace = True
@@ -107,6 +108,10 @@ class MultiheadAttention(nn.Module):
         query,
         key: Optional[Tensor],
         value: Optional[Tensor],
+        ngram: Optional[int] = None,
+        is_translate: Optional[bool] = False,
+        is_cascade: Optional[bool] = False,
+        offset: Optional[Tensor] = None,
         key_padding_mask: Optional[Tensor] = None,
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
         need_weights: bool = True,
@@ -132,6 +137,8 @@ class MultiheadAttention(nn.Module):
                 weights for each head. Implies *need_weights*. Default:
                 return the average attention weights over all heads.
         """
+        #if attn_mask is not None:
+        #    import pdb; pdb.set_trace()
         if need_head_weights:
             need_weights = True
 
@@ -314,11 +321,77 @@ class MultiheadAttention(nn.Module):
 
         if attn_mask is not None:
             attn_mask = attn_mask.unsqueeze(0)
-            if self.onnx_trace:
-                attn_mask = attn_mask.repeat(attn_weights.size(0), 1, 1)
-            attn_weights += attn_mask
+            if self.self_attention:
+                if is_cascade: # TODO: fully batching in batch dimension
+                    import pdb; pdb.set_trace()
+                    NGRAM = ngram + 1# validation
+                    attn_mask = attn_mask.expand(bsz, -1, -1).contiguous()
+                    assert attn_mask.size(-1) == attn_mask.size(-2), attn_mask.size()
+                    x, y = torch.meshgrid(torch.arange(attn_mask.size(-1)).to(attn_mask.device), torch.arange(attn_mask.size(-1)).to(attn_mask.device)) 
+                    x = x.unsqueeze(0).expand(bsz, -1, -1).contiguous()
+                    y = y.unsqueeze(0).expand(bsz, -1, -1).contiguous()
 
-        if key_padding_mask is not None:
+                    x_block_id = (x + NGRAM) // NGRAM
+                    #x_id = (x + NGRAM).fmod(NGRAM)
+                    y_block_id = (y + NGRAM) // NGRAM
+                    #y_id = (y  + NGRAM).fmod(NGRAM)
+                    attn_mask[x_block_id.ne(y_block_id)] = -float('inf')
+                    #attn_mask[:, :, 0] = 0
+                    attn_mask = attn_mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1).contiguous().view(-1, attn_mask.size(-1), attn_mask.size(-1)) # bsz, 1, 16, 16
+                elif self.training:
+                    NGRAM = 5
+                    attn_mask = attn_mask.expand(bsz, -1, -1).contiguous()
+                    assert attn_mask.size(-1) == attn_mask.size(-2), attn_mask.size()
+                    x, y = torch.meshgrid(torch.arange(attn_mask.size(-1)).to(attn_mask.device), torch.arange(attn_mask.size(-1)).to(attn_mask.device)) 
+                    x = x.unsqueeze(0).expand(bsz, -1, -1).contiguous()
+                    y = y.unsqueeze(0).expand(bsz, -1, -1).contiguous()
+                    assert offset is not None, offset
+
+                    x_block_id = (x - offset + NGRAM) // NGRAM
+                    #x_id = (x - offset + NGRAM).fmod(NGRAM)
+                    y_block_id = (y - offset + NGRAM) // NGRAM
+                    #y_id = (y - offset + NGRAM).fmod(NGRAM)
+                    attn_mask[x_block_id.ne(y_block_id)] = -float('inf')
+                    #attn_mask[:, :, 0] = 0
+                    attn_mask = attn_mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1).contiguous().view(-1, attn_mask.size(-1), attn_mask.size(-1)) # bsz, 1, 16, 16
+                elif not is_translate:
+                    NGRAM = ngram + 1# validation
+                    attn_mask = attn_mask.expand(bsz, -1, -1).contiguous()
+                    assert attn_mask.size(-1) == attn_mask.size(-2), attn_mask.size()
+                    x, y = torch.meshgrid(torch.arange(attn_mask.size(-1)).to(attn_mask.device), torch.arange(attn_mask.size(-1)).to(attn_mask.device)) 
+                    x = x.unsqueeze(0).expand(bsz, -1, -1).contiguous()
+                    y = y.unsqueeze(0).expand(bsz, -1, -1).contiguous()
+
+                    x_block_id = (x + NGRAM) // NGRAM
+                    #x_id = (x + NGRAM).fmod(NGRAM)
+                    y_block_id = (y + NGRAM) // NGRAM
+                    #y_id = (y  + NGRAM).fmod(NGRAM)
+                    attn_mask[x_block_id.ne(y_block_id)] = -float('inf')
+                    #attn_mask[:, :, 0] = 0
+                    attn_mask = attn_mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1).contiguous().view(-1, attn_mask.size(-1), attn_mask.size(-1)) # bsz, 1, 16, 16
+                else:
+                    NGRAM = ngram+1 # validation
+                    attn_mask = attn_mask.expand(bsz, -1, -1).contiguous()
+                    attn_mask.fill_(-float('inf'))
+                    i = 1
+                    while i <= tgt_len and i<=NGRAM:
+                        if i == 1:
+                            attn_mask[:, -i, -min(NGRAM, tgt_len):] = 0
+                        else:
+                            if i <= min(NGRAM, tgt_len):
+                                attn_mask[:, -i, -min(NGRAM, tgt_len):(-(i-1))] = 0
+                        i += 1
+                    #attn_mask[:, :, 0] = 0
+                    attn_mask = attn_mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1).contiguous().view(-1, attn_mask.size(-1), attn_mask.size(-1)) # bsz, 1, 16, 16
+                #import pdb; pdb.set_trace()
+                #import pdb; pdb.set_trace()
+
+            if self.onnx_trace:
+                assert False, 'onnx'
+                attn_mask = attn_mask.repeat(attn_weights.size(0), 1, 1)
+            attn_weights[attn_mask.eq(-float('inf'))] = -float('inf')# += attn_mask
+
+        if self.encoder_decoder_attention and (key_padding_mask is not None):
             # don't attend to padding symbols
             attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
             attn_weights = attn_weights.masked_fill(
@@ -339,6 +412,7 @@ class MultiheadAttention(nn.Module):
             training=self.training,
         )
         assert v is not None
+        v[v.ne(v)] = 0.
         attn = torch.bmm(attn_probs, v)
         assert list(attn.size()) == [bsz * self.num_heads, tgt_len, self.head_dim]
         if self.onnx_trace and attn.size(1) == 1:

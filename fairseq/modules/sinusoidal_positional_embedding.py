@@ -63,6 +63,7 @@ class SinusoidalPositionalEmbedding(nn.Module):
         incremental_state: Optional[Any] = None,
         timestep: Optional[Tensor] = None,
         positions: Optional[Any] = None,
+        position: Optional[Tensor] = None,
     ):
         """Input is expected to be of size [bsz x seqlen]."""
         bspair = torch.onnx.operators.shape_as_tensor(input)
@@ -75,7 +76,7 @@ class SinusoidalPositionalEmbedding(nn.Module):
             )
         self.weights = self.weights.to(self._float_tensor)
 
-        if incremental_state is not None:
+        if (incremental_state is not None) and False:
             # positions is the same for every token when decoding a single step
             pos = timestep.view(-1)[0] + 1 if timestep is not None else seq_len
             if self.onnx_trace:
@@ -89,6 +90,9 @@ class SinusoidalPositionalEmbedding(nn.Module):
         positions = utils.make_positions(
             input, self.padding_idx, onnx_trace=self.onnx_trace
         )
+        if position is not None:
+            positions = position
+        #import pdb; pdb.set_trace()
         if self.onnx_trace:
             flat_embeddings = self.weights.detach().index_select(0, positions.view(-1))
             embedding_shape = torch.cat(

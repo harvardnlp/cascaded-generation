@@ -34,7 +34,7 @@ mkdir -p $orig $tmp $prep
 
 echo "Downloading data from ${URL}..."
 cd $orig
-wget "$URL"
+#wget "$URL"
 
 if [ -f $GZ ]; then
     echo "Data successfully downloaded."

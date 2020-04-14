@@ -133,6 +133,7 @@ def _main(args, output_file):
     has_target = True
     wps_meter = TimeMeter()
     for sample in progress:
+        import pdb; pdb.set_trace()
         sample = utils.move_to_cuda(sample) if use_cuda else sample
         if 'net_input' not in sample:
             continue

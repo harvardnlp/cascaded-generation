@@ -53,10 +53,12 @@ class SequenceGenerator(object):
             match_source_len (bool, optional): outputs should match the source
                 length (default: False)
         """
+        #import pdb; pdb.set_trace()
         self.pad = tgt_dict.pad()
         self.unk = tgt_dict.unk()
         self.eos = tgt_dict.eos() if eos is None else eos
         self.vocab_size = len(tgt_dict)
+        self.tgt_dict = tgt_dict
         self.beam_size = beam_size
         # the max beam size is the dictionary size - 1, since we never select pad
         self.beam_size = min(beam_size, self.vocab_size - 1)
@@ -70,6 +72,9 @@ class SequenceGenerator(object):
         self.temperature = temperature
         self.match_source_len = match_source_len
         self.no_repeat_ngram_size = no_repeat_ngram_size
+
+        self.beam_sizes = '9:100:100:100:100:100:100:100:100:16'.split(':')
+        self.beam_sizes = [int(beam_size) for beam_size in self.beam_sizes]
         assert temperature > 0, '--temperature must be greater than 0'
 
         self.search = (
@@ -78,7 +83,7 @@ class SequenceGenerator(object):
 
 
     @torch.no_grad()
-    def generate(self, models, sample, **kwargs):
+    def generate(self, models, sample, ngram=None, **kwargs):
         """Generate a batch of translations.
 
         Args:
@@ -89,8 +94,235 @@ class SequenceGenerator(object):
             bos_token (int, optional): beginning of sentence token
                 (default: self.eos)
         """
+        assert len(models) == 1, len(models)
         model = EnsembleModel(models)
-        return self._generate(model, sample, **kwargs)
+        return self._generate2(model, sample, ngram=ngram, **kwargs)
+
+    @torch.no_grad()
+    def _generate2(
+        self,
+        model,
+        sample,
+        prefix_tokens=None,
+        bos_token=None,
+        ngram=None,
+        **kwargs
+    ):
+        assert not self.retain_dropout
+        model.eval()
+        # model.forward normally channels prev_output_tokens into the decoder
+        # separately, but SequenceGenerator directly calls model.encoder
+        encoder_input = {
+            k: v for k, v in sample['net_input'].items()
+            if k != 'prev_output_tokens'
+        }
+
+        src_tokens = encoder_input['src_tokens']
+        src_lengths = (src_tokens.ne(self.eos) & src_tokens.ne(self.pad)).long().sum(dim=1)
+        input_size = src_tokens.size()
+        # batch dimension goes first followed by source lengths
+        bsz = input_size[0]
+        src_len = input_size[1]
+        beam_size = self.beam_size
+
+        if self.match_source_len:
+            max_len = src_lengths.max().item()
+        else:
+            max_len = min(
+                int(self.max_len_a * src_len + self.max_len_b),
+                # exclude the EOS marker
+                model.max_decoder_positions() - 1,
+            )
+        assert self.min_len <= max_len, 'min_len cannot be larger than max_len, please adjust these!'
+
+        # compute the encoder output for each beam
+        encoder_outs = model.forward_encoder(encoder_input)
+        padding_idx = 1
+        target_lengths = sample['target'].ne(padding_idx).long().sum(-1) # bsz
+
+        length = target_lengths.max().item()
+
+        print ('here')
+        prev_beam_sizes = []
+        all_tokens = []
+
+        beam_sizes = self.beam_sizes[:length]
+
+        import pdb; pdb.set_trace()
+        device = src_tokens.device
+        new_order = torch.arange(bsz).view(-1, 1).repeat(1, length).view(-1)
+        new_order = new_order.to(device).long()
+        encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
+        for order, beam_size in enumerate(beam_sizes):
+            if order == 0:
+                # goal: unigram_probs = torch.zeros(1, length, len(vocab))
+                prev_output_tokens = src_tokens.new(bsz*length, 1).fill_(0)
+                position = torch.arange(length).view(1, -1).repeat(bsz, 1) + 2
+                position = position.to(device).long().view(-1, 1)
+                lprobs, _ = model.forward_decoder(
+                    prev_output_tokens, encoder_outs, temperature=self.temperature, disable_incremental_states=False, ngram=order, is_cascade=True, position=position,
+                ) # bsz, V
+                unigram_probs = lprobs.view(bsz, length, -1).contiguous() # bsz, length, V
+                V = unigram_probs.size(-1)
+                # make sure length constraints are satisfied
+                ids = torch.arange(length).view(1, -1).expand(bsz, -1).to(device)
+                unigram_probs[ids.ge(target_lengths.view(-1, 1)-1)] = -float('inf')
+                unigram_probs[:, :, 2][ids.ge(target_lengths.view(-1, 1)-1)] = 0
+
+                scores, mapping = torch.topk(unigram_probs, beam_size, -1) # bsz, L, K
+
+                all_tokens.append(mapping.cpu().unsqueeze(-1))
+
+                probs = scores[:, 0].contiguous() # bsz, K
+                next_words = mapping[:, 1:] # bsz, L-1, K
+                new_order = torch.arange(bsz*length).view(-1, 1).repeat(1, beam_size).view(-1)
+                new_order = new_order.to(device).long()
+                encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
+                model.reorder_incremental_state(new_order)
+                position = position.view(-1, 1).repeat(1, beam_size).view(-1, 1)
+                prev_beam_sizes.append(beam_size)
+            else:
+                prev_output_tokens = all_tokens[-1].view(-1, order).to(device) # bsz* L* K, order
+                bos_tokens = src_tokens.new(prev_output_tokens.size(0), 1).fill_(0)
+                prev_output_tokens = torch.cat([bos_tokens, prev_output_tokens], -1)
+                prev_position = position
+                position = prev_position.add(1) # -1, 1
+                position = torch.cat([prev_position, position], -1)
+                lprobs, _ = model.forward_decoder(
+                    prev_output_tokens, encoder_outs, temperature=self.temperature, disable_incremental_states=False, ngram=order, is_cascade=True, position=position,
+                ) # bsz, V
+                ngram_probs = lprobs.view(bsz, length-order+1, prev_beam_sizes[-1], -1).contiguous() # bsz, length, K, V
+                next_words = next_words.unsqueeze(-2).expand(-1, -1, prev_beam_sizes[-1], -1) # bsz, L-1, K, K
+                next_scores = ngram_probs.gather(-1, next_words) # bsz, L-1, K, K
+                #import pdb; pdb.set_trace()
+                #ngram_probs = torch.zeros(bsz, length-order, prev_beam_sizes[-1], V) # length-order, K, V
+                #new_order = torch.arange(
+                #ngram_probs[0, :, :] = probs.unsqueeze(-1).expand(-1, V) # accum for the first step
+                #states_new = [[[None for v in range(V)] for k in range(prev_beam_sizes[-1])] for l in range(length-order)]
+                #for l in range(length-order):
+                #    for k in range(prev_beam_sizes[-1]):
+                #        state = states[l][k]
+                #        for v in range(V):
+                #            w = itos[v]
+                #            state_w = kenlm.State()
+                #            score = m.BaseScore(state, w, state_w)
+                #            if w == '<s>':
+                #                score = -float('inf')
+                #                state_w = None
+                #            if l == length-order-1:
+                #                if w != '</s>':
+                #                    score = -float('inf')
+                #                #else:
+                #                #    import pdb; pdb.set_trace()
+                #            else:
+                #                if w == '</s>':
+                #                    score = -float('inf')
+                #            ngram_probs[l][k][v] += score
+                #            states_new[l][k][v] = state_w
+
+                #states = states_new
+                #import pdb; pdb.set_trace()
+
+                #states_new = [[[states[l][k1][next_words[l][k1][k2]] for k2 in range(]]
+
+                # TODO: 1 we need to mask incompatible; 2 transpose
+                if order > 1:
+                    assert False
+                    ##import pdb; pdb.set_trace()
+                    #first_node = all_tokens[-1][:-1, :, 1:].unsqueeze(-2).expand(-1, -1, prev_beam_sizes[-1], -1) # L-3, K, 1*K, order-2
+                    #next_node = all_tokens[-1][1:, :, :-1].unsqueeze(-3).expand(-1, prev_beam_sizes[-1], -1, -1) # L-3, 1*K, K, order-2
+                    #boolean = first_node.ne(next_node).any(-1)
+                    #next_scores[boolean] = -float('inf')
+                # TODO: we need to mask incompatible
+                ngram_probs = next_scores
+
+
+                if order != len(beam_sizes)-1:
+                    #dist = torch_struct.LinearChainCRF(ngram_probs)
+                    if ngram_probs.size(-1) not in fbs:
+                        fbs[ngram_probs.size(-1)] = foo.fb_max(ngram_probs.size(-1))
+                    fb = fbs[ngram_probs.size(-1)]
+                    #edge_marginals = dist.marginals # 1, length-2, K, K
+                    #edge_max_marginals = dist.max_marginals # 1, length-2, K, K
+                    with torch.no_grad():
+                        edge_max_marginals = fb(ngram_probs.transpose(0,1).contiguous()).cpu() # 1, length-2, K, K
+                        edge_marginals = edge_max_marginals.contiguous()
+                        scores, mapping = torch.topk(edge_marginals.view(1, length-order, -1), beam_size, -1) # 1, length-1, beam_size
+                        # scores: 1, L-1, 500
+                        mapping2 = mapping[0] # L-1, K2
+                        #import pdb; pdb.set_trace()
+                        probs = ngram_probs.view(length-order, -1)[0].gather(0, mapping2[0])# L-1, K2
+                        x_idx0 = mapping2 // prev_beam_sizes[-1]
+                        x_idx = x_idx0.unsqueeze(-1) # L-1, K2, 1
+                        y_idx0 = mapping2.fmod(prev_beam_sizes[-1])
+                        y_idx = y_idx0.unsqueeze(-1) # L-1, K2, 1
+
+                    prev_mapping = all_tokens[-1] # L, K1, order
+                    x_idx = x_idx.expand(-1, -1, prev_mapping.size(-1))
+                    prev_mapping_x_idx = prev_mapping[:-1].gather(1, x_idx) # L-1, K2, order
+
+                    prev_mapping_last_y_idx = prev_mapping[1:, :, -1:].gather(1, y_idx) # L-1, K, 1
+                    next_words = prev_mapping_last_y_idx[1:, :, 0] # L-2, K
+                    mapping2 = torch.cat([prev_mapping_x_idx, prev_mapping_last_y_idx], -1) # L-1, K, 2
+                    all_tokens.append(mapping2)
+                        #y_idx = next_words[:,0,:].gather(-1, y_idx) # L-1, K
+
+                    states_new = [[states[l][x_idx0[l][k1].item()][prev_mapping_last_y_idx[l][k1][0].item()] for k1 in range(beam_size)] for l in range(length-order-1)] # L-2, K
+                    states = states_new
+# TODO:     next_words, from y, replace print_constraints
+                    #total_time += end - start
+                else:
+                    ngram_probs = ngram_probs.transpose(-1, -2)
+                    #import pdb; pdb.set_trace()
+                    tokens_ = all_tokens[-1]
+                    def get_sent(sample):
+                        prev_xi = None
+                        prev_xj = None
+                        all_tokens = None
+
+                        for l in range(sample.size(1)):
+                            s = sample[0][l]
+                            nnz = s.nonzero()[0]
+                            xi = nnz[1]
+                            xj = nnz[0]
+                            if prev_xj is not None:
+                                assert xi == prev_xj, (xi, xj, prev_xi, prev_xj)
+                            tokens = tokens_[l][xi]
+                            #_, tokens = get_tokens(all_mappings, prev_beam_sizes[:-1], l, xi)
+                            if l == 0:
+                                all_tokens = tokens.tolist()
+                            else:
+                                all_tokens.append(tokens[-1].item())
+                            prev_xi = xi
+                            prev_xj = xj
+                        tokens = tokens_[sample.size(1)][xj]
+                        #_, tokens = get_tokens(all_mappings, prev_beam_sizes[:-1], sample.size(1), xj)
+                        all_tokens.append(tokens[-1])
+                            
+                        all_words = [itos[item] for item in all_tokens]
+                        assert all_words[-1] == '</s>', all_words
+                        perplexity = m.perplexity(' '.join(all_words[:-1]))
+                        return all_words, perplexity
+
+                    torch.cuda.empty_cache()
+                    ngram_probs = ngram_probs.cpu()
+                    dist = torch_struct.LinearChainCRF(ngram_probs)
+                    argmax = dist.argmax
+                    all_words, perplexity = get_sent(argmax)
+                    print (f'argmax PPL {perplexity}:', ' '.join(all_words).replace(' ', '').replace('<space>', ' '))
+                    end = time.time()
+
+                    print (f'length: {length}, time: {end-start}')
+
+                    #for i in range(beam_size):
+                    #    samples = dist.sample((1, ))
+                    #    all_words, perplexity = get_sent(samples[0])
+                    #    #samples = dist.topk(beam_size)
+                    #    print (f'sample {i} PPL {perplexity}:', ' '.join(all_words).replace(' ', '').replace('<space>', ' '))
+                    break
+            #new_order = torch.arange(bsz).view(-1, 1).repeat(1, beam_size).view(-1)
+            #new_order = new_order.to(src_tokens.device).long()
+            #encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
 
     @torch.no_grad()
     def _generate(
@@ -99,6 +331,7 @@ class SequenceGenerator(object):
         sample,
         prefix_tokens=None,
         bos_token=None,
+        ngram=None,
         **kwargs
     ):
         if not self.retain_dropout:
@@ -262,6 +495,7 @@ class SequenceGenerator(object):
 
         reorder_state = None
         batch_idxs = None
+        #import pdb; pdb.set_trace()
         for step in range(max_len + 1):  # one extra step for EOS marker
             # reorder decoder internal states based on the prev choice of beams
             if reorder_state is not None:
@@ -273,7 +507,7 @@ class SequenceGenerator(object):
                 encoder_outs = model.reorder_encoder_out(encoder_outs, reorder_state)
 
             lprobs, avg_attn_scores = model.forward_decoder(
-                tokens[:, :step + 1], encoder_outs, temperature=self.temperature,
+                tokens[:, :step + 1], encoder_outs, temperature=self.temperature, disable_incremental_states = (ngram != None), ngram=ngram,
             )
             lprobs[lprobs != lprobs] = -math.inf
 
@@ -398,7 +632,7 @@ class SequenceGenerator(object):
             assert num_remaining_sent >= 0
             if num_remaining_sent == 0:
                 break
-            assert step < max_len
+            assert step <= max_len
 
             if len(finalized_sents) > 0:
                 new_bsz = bsz - len(finalized_sents)
@@ -531,7 +765,7 @@ class EnsembleModel(torch.nn.Module):
         return [model.encoder(**encoder_input) for model in self.models]
 
     @torch.no_grad()
-    def forward_decoder(self, tokens, encoder_outs, temperature=1.):
+    def forward_decoder(self, tokens, encoder_outs, temperature=1., disable_incremental_states=False, ngram=None, is_cascade=False, position=None):
         if len(self.models) == 1:
             return self._decode_one(
                 tokens,
@@ -540,7 +774,12 @@ class EnsembleModel(torch.nn.Module):
                 self.incremental_states,
                 log_probs=True,
                 temperature=temperature,
+                disable_incremental_states=disable_incremental_states,
+                ngram=ngram,
+                is_cascade=is_cascade,
+                position=position,
             )
+        assert False, len(self.models)
 
         log_probs = []
         avg_attn = None
@@ -567,14 +806,23 @@ class EnsembleModel(torch.nn.Module):
     def _decode_one(
         self, tokens, model, encoder_out, incremental_states, log_probs,
         temperature=1.,
+        disable_incremental_states=False,
+        ngram=None,
+        is_cascade=False,
+        position=None,
     ):
+        if disable_incremental_states:
+            self.incremental_states = None
         if self.incremental_states is not None:
             decoder_out = list(model.forward_decoder(
-                tokens, encoder_out=encoder_out, incremental_state=self.incremental_states[model],
+                tokens, encoder_out=encoder_out, incremental_state=self.incremental_states[model], ngram=ngram, is_translate=True, is_cascade=is_cascade, position=position,
             ))
+            #assert False, 'here'
         else:
-            decoder_out = list(model.forward_decoder(tokens, encoder_out=encoder_out))
-        decoder_out[0] = decoder_out[0][:, -1:, :]
+            assert position is None, position.size()
+            decoder_out = list(model.forward_decoder(tokens, encoder_out=encoder_out, ngram=ngram, is_translate=True, is_cascade=is_cascade))
+        if not is_cascade:
+            decoder_out[0] = decoder_out[0][:, -1:, :]
         if temperature != 1.:
             decoder_out[0].div_(temperature)
         attn = decoder_out[1] if len(decoder_out) > 1 else None
@@ -585,7 +833,8 @@ class EnsembleModel(torch.nn.Module):
         if attn is not None:
             attn = attn[:, -1, :]
         probs = model.get_normalized_probs(decoder_out, log_probs=log_probs)
-        probs = probs[:, -1, :]
+        if not is_cascade:
+            probs = probs[:, -1, :]
         return probs, attn
 
     def reorder_encoder_out(self, encoder_outs, new_order):
