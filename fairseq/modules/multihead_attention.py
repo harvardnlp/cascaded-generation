@@ -391,7 +391,7 @@ class MultiheadAttention(nn.Module):
                 attn_mask = attn_mask.repeat(attn_weights.size(0), 1, 1)
             attn_weights[attn_mask.eq(-float('inf'))] = -float('inf')# += attn_mask
 
-        if self.encoder_decoder_attention and (key_padding_mask is not None):
+        if key_padding_mask is not None:
             # don't attend to padding symbols
             attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
             attn_weights = attn_weights.masked_fill(

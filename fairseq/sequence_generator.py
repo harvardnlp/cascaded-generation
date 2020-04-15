@@ -6,11 +6,18 @@
 import math
 
 import torch
-
+import torch_struct
 from fairseq import search, utils
 from fairseq.data import data_utils
 from fairseq.models import FairseqIncrementalDecoder
 
+import importlib.util
+spec = importlib.util.spec_from_file_location("get_fb", "/n/home11/yuntian/genbmm/opt/hmm.py")
+foo = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(foo)
+fbs = {}
+total_num_valid = [0. for _ in range(5)]
+total_num_total = [0. for _ in range(5)]
 
 class SequenceGenerator(object):
     def __init__(
@@ -73,7 +80,7 @@ class SequenceGenerator(object):
         self.match_source_len = match_source_len
         self.no_repeat_ngram_size = no_repeat_ngram_size
 
-        self.beam_sizes = '9:100:100:100:100:100:100:100:100:16'.split(':')
+        self.beam_sizes = '9:11:13:17:0'.split(':')
         self.beam_sizes = [int(beam_size) for beam_size in self.beam_sizes]
         assert temperature > 0, '--temperature must be greater than 0'
 
@@ -139,6 +146,14 @@ class SequenceGenerator(object):
         encoder_outs = model.forward_encoder(encoder_input)
         padding_idx = 1
         target_lengths = sample['target'].ne(padding_idx).long().sum(-1) # bsz
+        print ('max',target_lengths.max())
+        if target_lengths.max() > 100:
+            target_lengths = target_lengths.clamp(max=30)
+        if target_lengths.max() > 60:
+            print ('warning', '*'*55)
+            target_lengths = target_lengths.clamp(max=60)
+
+
 
         length = target_lengths.max().item()
 
@@ -148,12 +163,14 @@ class SequenceGenerator(object):
 
         beam_sizes = self.beam_sizes[:length]
 
-        import pdb; pdb.set_trace()
         device = src_tokens.device
         new_order = torch.arange(bsz).view(-1, 1).repeat(1, length).view(-1)
+        finalized = [[] for i in range(bsz)]
+        #import pdb; pdb.set_trace()
         new_order = new_order.to(device).long()
         encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
         for order, beam_size in enumerate(beam_sizes):
+            beam_size = self.beam_size
             if order == 0:
                 # goal: unigram_probs = torch.zeros(1, length, len(vocab))
                 prev_output_tokens = src_tokens.new(bsz*length, 1).fill_(0)
@@ -168,6 +185,7 @@ class SequenceGenerator(object):
                 ids = torch.arange(length).view(1, -1).expand(bsz, -1).to(device)
                 unigram_probs[ids.ge(target_lengths.view(-1, 1)-1)] = -float('inf')
                 unigram_probs[:, :, 2][ids.ge(target_lengths.view(-1, 1)-1)] = 0
+                unigram_probs[:, :, 2][ids.lt(target_lengths.view(-1, 1)-1)] = -float('inf')
 
                 scores, mapping = torch.topk(unigram_probs, beam_size, -1) # bsz, L, K
 
@@ -184,14 +202,22 @@ class SequenceGenerator(object):
             else:
                 prev_output_tokens = all_tokens[-1].view(-1, order).to(device) # bsz* L* K, order
                 bos_tokens = src_tokens.new(prev_output_tokens.size(0), 1).fill_(0)
-                prev_output_tokens = torch.cat([bos_tokens, prev_output_tokens], -1)
+                prev_output_tokens = torch.cat([bos_tokens, prev_output_tokens], -1) # bsz* L* K, order+1
                 prev_position = position
-                position = prev_position.add(1) # -1, 1
-                position = torch.cat([prev_position, position], -1)
+                position = prev_position[:,-1:].add(1) # -1, 1
+                position = torch.cat([prev_position, position], -1) # bsz* L* K, order
                 lprobs, _ = model.forward_decoder(
                     prev_output_tokens, encoder_outs, temperature=self.temperature, disable_incremental_states=False, ngram=order, is_cascade=True, position=position,
                 ) # bsz, V
                 ngram_probs = lprobs.view(bsz, length-order+1, prev_beam_sizes[-1], -1).contiguous() # bsz, length, K, V
+                ngram_probs = ngram_probs[:, :-1] # bsz, length-1, K, V
+                #import pdb; pdb.set_trace()
+                ids = torch.arange(length-order).view(1, -1).expand(bsz, -1).to(device)
+                ngram_probs[:, :, :, 2][ids.ge(target_lengths.view(-1, 1)-1-order)] = 0
+                ngram_probs[ids.ge(target_lengths.view(-1, 1)-1-order)] = -float('inf')
+                ngram_probs[:, :, :, 2][ids.ge(target_lengths.view(-1, 1)-1-order)] = 0
+                ngram_probs[:, 0] = ngram_probs[:, 0] + probs.unsqueeze(-1)
+
                 next_words = next_words.unsqueeze(-2).expand(-1, -1, prev_beam_sizes[-1], -1) # bsz, L-1, K, K
                 next_scores = ngram_probs.gather(-1, next_words) # bsz, L-1, K, K
                 #import pdb; pdb.set_trace()
@@ -227,16 +253,18 @@ class SequenceGenerator(object):
 
                 # TODO: 1 we need to mask incompatible; 2 transpose
                 if order > 1:
-                    assert False
                     ##import pdb; pdb.set_trace()
-                    #first_node = all_tokens[-1][:-1, :, 1:].unsqueeze(-2).expand(-1, -1, prev_beam_sizes[-1], -1) # L-3, K, 1*K, order-2
-                    #next_node = all_tokens[-1][1:, :, :-1].unsqueeze(-3).expand(-1, prev_beam_sizes[-1], -1, -1) # L-3, 1*K, K, order-2
-                    #boolean = first_node.ne(next_node).any(-1)
-                    #next_scores[boolean] = -float('inf')
+                    first_node = all_tokens[-1][:, :-1, :, 1:].unsqueeze(-2).expand(-1, -1, -1, prev_beam_sizes[-1], -1) # bsz, L-3, K, 1*K, order-2
+                    next_node = all_tokens[-1][:, 1:, :, :-1].unsqueeze(-3).expand(-1, -1, prev_beam_sizes[-1], -1, -1) # bsz, L-3, 1*K, K, order-2
+                    boolean = first_node.ne(next_node).any(-1)
+                    next_scores[boolean] = -float('inf')
                 # TODO: we need to mask incompatible
-                ngram_probs = next_scores
+                ngram_probs = next_scores # bsz, length-1, K, K
+                total_num_valid[order] += ngram_probs.ne(-float('inf')).float().sum().item()
+                total_num_total[order] += ngram_probs.view(-1).size(0)
+                print ('order', order, 'percent', total_num_valid[order]/total_num_total[order], 'valid', total_num_valid[order], 'total', total_num_total[order])
 
-
+                #import pdb; pdb.set_trace()
                 if order != len(beam_sizes)-1:
                     #dist = torch_struct.LinearChainCRF(ngram_probs)
                     if ngram_probs.size(-1) not in fbs:
@@ -245,74 +273,77 @@ class SequenceGenerator(object):
                     #edge_marginals = dist.marginals # 1, length-2, K, K
                     #edge_max_marginals = dist.max_marginals # 1, length-2, K, K
                     with torch.no_grad():
-                        edge_max_marginals = fb(ngram_probs.transpose(0,1).contiguous()).cpu() # 1, length-2, K, K
-                        edge_marginals = edge_max_marginals.contiguous()
-                        scores, mapping = torch.topk(edge_marginals.view(1, length-order, -1), beam_size, -1) # 1, length-1, beam_size
+
+                        edge_max_marginals = fb(ngram_probs.transpose(0, 1).contiguous()).cpu() # bsz, length-1, K, K
+                        edge_marginals = edge_max_marginals.transpose(0, 1).contiguous() # bsz, length-1, K, K
+                        scores, mapping = torch.topk(edge_marginals.view(bsz, length-order, -1), beam_size, -1) # bsz, length-1, beam_size
                         # scores: 1, L-1, 500
-                        mapping2 = mapping[0] # L-1, K2
+                        mapping2 = mapping.to(device) #bsz,  length-1, K2
                         #import pdb; pdb.set_trace()
-                        probs = ngram_probs.view(length-order, -1)[0].gather(0, mapping2[0])# L-1, K2
-                        x_idx0 = mapping2 // prev_beam_sizes[-1]
-                        x_idx = x_idx0.unsqueeze(-1) # L-1, K2, 1
+                        probs = ngram_probs[:, 0].view(bsz, -1).gather(-1, mapping2[:, 0])# bsz, K2
+                        x_idx0 = mapping2 // prev_beam_sizes[-1] # bsz, length-1, K2
+                        x_idx = x_idx0.unsqueeze(-1) # bsz, L-1, K2, 1
                         y_idx0 = mapping2.fmod(prev_beam_sizes[-1])
-                        y_idx = y_idx0.unsqueeze(-1) # L-1, K2, 1
+                        y_idx = y_idx0.unsqueeze(-1) # bsz, L-1, K2, 1
 
-                    prev_mapping = all_tokens[-1] # L, K1, order
-                    x_idx = x_idx.expand(-1, -1, prev_mapping.size(-1))
-                    prev_mapping_x_idx = prev_mapping[:-1].gather(1, x_idx) # L-1, K2, order
+                        new_order = torch.arange(bsz) * (length-order+1) * prev_beam_sizes[-1]
+                        new_order = new_order.to(device).view(-1, 1, 1) # bsz, 1, 1
+                        tmp = torch.arange(length-order) * prev_beam_sizes[-1]
+                        tmp = tmp.to(device).view(1, -1, 1) # 1, length-1, 1
+                        new_order = new_order + tmp + x_idx0 # bsz, length-1, K2
+                        new_order = new_order.long().view(-1)
+                        position = position.index_select(0, new_order) # bsz*length-1*K2, order
+                        encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
+                        model.reorder_incremental_state(new_order)
 
-                    prev_mapping_last_y_idx = prev_mapping[1:, :, -1:].gather(1, y_idx) # L-1, K, 1
-                    next_words = prev_mapping_last_y_idx[1:, :, 0] # L-2, K
-                    mapping2 = torch.cat([prev_mapping_x_idx, prev_mapping_last_y_idx], -1) # L-1, K, 2
-                    all_tokens.append(mapping2)
+
+                    prev_mapping = all_tokens[-1].to(device) # bsz, L, K1, order
+                    x_idx = x_idx.expand(-1, -1, -1, prev_mapping.size(-1))
+                    prev_mapping_x_idx = prev_mapping[:, :-1].gather(2, x_idx) # bsz, L-1, K2, order
+
+                    prev_mapping_last_y_idx = prev_mapping[:, 1:, :, -1:].gather(2, y_idx) # bsz, L-1, K, 1
+                    next_words = prev_mapping_last_y_idx[:, 1:, :, 0] # bsz, L-2, K
+                    mapping2 = torch.cat([prev_mapping_x_idx, prev_mapping_last_y_idx], -1) # bsz, L-1, K2, 2
+                    all_tokens.append(mapping2.cpu())
+                    prev_beam_sizes.append(beam_size)
                         #y_idx = next_words[:,0,:].gather(-1, y_idx) # L-1, K
 
-                    states_new = [[states[l][x_idx0[l][k1].item()][prev_mapping_last_y_idx[l][k1][0].item()] for k1 in range(beam_size)] for l in range(length-order-1)] # L-2, K
-                    states = states_new
+                    #TODO: states_new = [[states[l][x_idx0[l][k1].item()][prev_mapping_last_y_idx[l][k1][0].item()] for k1 in range(beam_size)] for l in range(length-order-1)] # L-2, K
+                    #TODO: states = states_new
 # TODO:     next_words, from y, replace print_constraints
                     #total_time += end - start
                 else:
-                    ngram_probs = ngram_probs.transpose(-1, -2)
+                    ngram_probs = ngram_probs.transpose(-1, -2) # bsz, l, K, K
                     #import pdb; pdb.set_trace()
                     tokens_ = all_tokens[-1]
-                    def get_sent(sample):
-                        prev_xi = None
-                        prev_xj = None
-                        all_tokens = None
-
-                        for l in range(sample.size(1)):
-                            s = sample[0][l]
-                            nnz = s.nonzero()[0]
-                            xi = nnz[1]
-                            xj = nnz[0]
-                            if prev_xj is not None:
-                                assert xi == prev_xj, (xi, xj, prev_xi, prev_xj)
-                            tokens = tokens_[l][xi]
-                            #_, tokens = get_tokens(all_mappings, prev_beam_sizes[:-1], l, xi)
-                            if l == 0:
-                                all_tokens = tokens.tolist()
-                            else:
-                                all_tokens.append(tokens[-1].item())
-                            prev_xi = xi
-                            prev_xj = xj
-                        tokens = tokens_[sample.size(1)][xj]
-                        #_, tokens = get_tokens(all_mappings, prev_beam_sizes[:-1], sample.size(1), xj)
-                        all_tokens.append(tokens[-1])
-                            
-                        all_words = [itos[item] for item in all_tokens]
-                        assert all_words[-1] == '</s>', all_words
-                        perplexity = m.perplexity(' '.join(all_words[:-1]))
-                        return all_words, perplexity
 
                     torch.cuda.empty_cache()
                     ngram_probs = ngram_probs.cpu()
                     dist = torch_struct.LinearChainCRF(ngram_probs)
-                    argmax = dist.argmax
-                    all_words, perplexity = get_sent(argmax)
-                    print (f'argmax PPL {perplexity}:', ' '.join(all_words).replace(' ', '').replace('<space>', ' '))
-                    end = time.time()
-
-                    print (f'length: {length}, time: {end-start}')
+                    argmax = dist.argmax.transpose(-1,-2) # bsz, l, K, K
+                    K = argmax.size(-1)
+                    argmax = argmax.contiguous().view(bsz, argmax.size(1), -1)
+                    max_ids = argmax.max(-1)[1] # bsz, l
+                    max_ids_x = max_ids // K # bsz, l
+                    max_ids_y = max_ids.fmod(K) # bsz, l
+                    tokens = torch.cat([max_ids_x, max_ids_y[:, -1:]], 1) # bsz, l+1
+                    first_token = tokens[:, 0] # bsz
+# tokens_[:, 0] bsz, K, order
+                    first_tokens = tokens_[:, 0].gather(1, first_token.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, tokens_.size(-1))).squeeze(1) # bsz, order
+# tokens_: bsz, l, K, order
+                    later_token = tokens[:, 1:] # bsz, l
+# tokens_[:, :, :, -1]: bsz, l, K
+                    later_tokens = tokens_[:, 1:, :, -1].gather(2, later_token.unsqueeze(-1)).squeeze(-1) # bsz, l
+                    tokens = torch.cat([first_tokens, later_tokens], 1) # bsz, l+order
+                    for i in range(bsz):
+                        hypo = {
+                            'tokens': tokens[i],
+                            'score': 0,
+                            'attention': None,  # src_len x tgt_len
+                            'alignment': None,
+                            'positional_scores': torch.zeros(1),
+                        }
+                        finalized[i].append(hypo)
 
                     #for i in range(beam_size):
                     #    samples = dist.sample((1, ))
@@ -323,6 +354,7 @@ class SequenceGenerator(object):
             #new_order = torch.arange(bsz).view(-1, 1).repeat(1, beam_size).view(-1)
             #new_order = new_order.to(src_tokens.device).long()
             #encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
+        return finalized
 
     @torch.no_grad()
     def _generate(
