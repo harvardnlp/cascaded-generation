@@ -777,6 +777,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             if ngram+1 <= prev_output_tokens.size(1):
                 prev_output_tokens[:, -(ngram+1)] = bos
         else:
+            #import pdb; pdb.set_trace()
             offset = None
             NGRAM = ngram + 1
             ids = torch.arange(tgt_length).view(1, -1).expand(bsz, -1).to(prev_output_tokens.device) # bsz, tgt_length
@@ -851,6 +852,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                     encoder_states = encoder_out.encoder_states
                     assert encoder_states is not None
                     encoder_state = encoder_states[idx]
+                    assert False
                 else:
                     encoder_state = encoder_out.encoder_out
 

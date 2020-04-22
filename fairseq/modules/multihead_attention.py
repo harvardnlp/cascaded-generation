@@ -142,6 +142,8 @@ class MultiheadAttention(nn.Module):
         if need_head_weights:
             need_weights = True
 
+        #if self.encoder_decoder_attention:
+        #    import pdb; pdb.set_trace()
         tgt_len, bsz, embed_dim = query.size()
         assert embed_dim == self.embed_dim
         assert list(query.size()) == [tgt_len, bsz, embed_dim]
@@ -210,6 +212,7 @@ class MultiheadAttention(nn.Module):
         q *= self.scaling
 
         if self.bias_k is not None:
+            assert False
             assert self.bias_v is not None
             k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
             v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
@@ -231,25 +234,53 @@ class MultiheadAttention(nn.Module):
             .view(tgt_len, bsz * self.num_heads, self.head_dim)
             .transpose(0, 1)
         )
+        flag_cascade = False
         if k is not None:
-            k = (
-                k.contiguous()
-                .view(-1, bsz * self.num_heads, self.head_dim)
-                .transpose(0, 1)
-            )
+            kbsz = k.size(1)
+            if kbsz != bsz:
+                flag_cascade = True
+                assert tgt_len == 1, tgt_len
+                assert bsz % kbsz == 0, (kbsz, bsz)
+                k = (
+                    k.contiguous()
+                    .view(-1, kbsz * self.num_heads, self.head_dim)
+                    .transpose(0, 1) # kbsz*num_heads, l, H
+                )
+            else:
+                k = (
+                    k.contiguous()
+                    .view(-1, bsz * self.num_heads, self.head_dim)
+                    .transpose(0, 1)
+                )
         if v is not None:
-            v = (
-                v.contiguous()
-                .view(-1, bsz * self.num_heads, self.head_dim)
-                .transpose(0, 1)
-            )
+            if flag_cascade:
+                assert v.size(1) == kbsz, (v.size(), kbsz, bsz)
+                v = (
+                    v.contiguous()
+                    .view(-1, kbsz * self.num_heads, self.head_dim)
+                    .transpose(0, 1) # kbsz*num_heads, l, H
+                )
+            else:
+                v = (
+                    v.contiguous()
+                    .view(-1, bsz * self.num_heads, self.head_dim)
+                    .transpose(0, 1)
+                )
 
         if saved_state is not None:
             # saved states are stored with shape (bsz, num_heads, seq_len, head_dim)
             if "prev_key" in saved_state:
                 _prev_key = saved_state["prev_key"]
                 assert _prev_key is not None
-                prev_key = _prev_key.view(bsz * self.num_heads, -1, self.head_dim)
+                kbsz = _prev_key.size(0)
+                if kbsz != bsz:
+                    flag_cascade = True
+                if flag_cascade:
+                    prev_key = _prev_key.view(kbsz * self.num_heads, -1, self.head_dim)
+                else:
+                    #if bsz * self.num_heads == 2560 and not self.self_attention:
+                    #    import pdb; pdb.set_trace()
+                    prev_key = _prev_key.view(bsz * self.num_heads, -1, self.head_dim)
                 if static_kv:
                     k = prev_key
                 else:
@@ -258,7 +289,10 @@ class MultiheadAttention(nn.Module):
             if "prev_value" in saved_state:
                 _prev_value = saved_state["prev_value"]
                 assert _prev_value is not None
-                prev_value = _prev_value.view(bsz * self.num_heads, -1, self.head_dim)
+                if flag_cascade:
+                    prev_value = _prev_value.view(kbsz * self.num_heads, -1, self.head_dim)
+                else:
+                    prev_value = _prev_value.view(bsz * self.num_heads, -1, self.head_dim)
                 if static_kv:
                     v = prev_value
                 else:
@@ -268,22 +302,37 @@ class MultiheadAttention(nn.Module):
             if "prev_key_padding_mask" in saved_state:
                 prev_key_padding_mask = saved_state["prev_key_padding_mask"]
             assert k is not None and v is not None
-            key_padding_mask = MultiheadAttention._append_prev_key_padding_mask(
-                key_padding_mask=key_padding_mask,
-                prev_key_padding_mask=prev_key_padding_mask,
-                batch_size=bsz,
-                src_len=k.size(1),
-                static_kv=static_kv,
-            )
+            if flag_cascade:
+                key_padding_mask = MultiheadAttention._append_prev_key_padding_mask(
+                    key_padding_mask=key_padding_mask,
+                    prev_key_padding_mask=prev_key_padding_mask,
+                    batch_size=kbsz,
+                    src_len=k.size(1),
+                    static_kv=static_kv,
+                )
+            else:
+                key_padding_mask = MultiheadAttention._append_prev_key_padding_mask(
+                    key_padding_mask=key_padding_mask,
+                    prev_key_padding_mask=prev_key_padding_mask,
+                    batch_size=bsz,
+                    src_len=k.size(1),
+                    static_kv=static_kv,
+                )
 
-            saved_state["prev_key"] = k.view(bsz, self.num_heads, -1, self.head_dim)
-            saved_state["prev_value"] = v.view(bsz, self.num_heads, -1, self.head_dim)
+            if flag_cascade:
+                saved_state["prev_key"] = k.view(kbsz, self.num_heads, -1, self.head_dim)
+                saved_state["prev_value"] = v.view(kbsz, self.num_heads, -1, self.head_dim)
+            else:
+                saved_state["prev_key"] = k.view(bsz, self.num_heads, -1, self.head_dim)
+                saved_state["prev_value"] = v.view(bsz, self.num_heads, -1, self.head_dim)
             saved_state["prev_key_padding_mask"] = key_padding_mask
             # In this branch incremental_state is never None
             assert incremental_state is not None
             incremental_state = self._set_input_buffer(incremental_state, saved_state)
         assert k is not None
         src_len = k.size(1)
+        if flag_cascade:
+            q = q.contiguous().view(kbsz, -1, self.num_heads, self.head_dim).transpose(1, 2).contiguous().view(kbsz*self.num_heads, -1, self.head_dim) # kbsz*num_heads, f, H
 
         # This is part of a workaround to get around fork/join parallelism
         # not supporting Optional types.
@@ -291,10 +340,14 @@ class MultiheadAttention(nn.Module):
             key_padding_mask = None
 
         if key_padding_mask is not None:
-            assert key_padding_mask.size(0) == bsz
+            if flag_cascade:
+                assert key_padding_mask.size(0) == kbsz
+            else:
+                assert key_padding_mask.size(0) == bsz
             assert key_padding_mask.size(1) == src_len
 
         if self.add_zero_attn:
+            assert False
             assert v is not None
             src_len += 1
             k = torch.cat([k, k.new_zeros((k.size(0), 1) + k.size()[2:])], dim=1)
@@ -314,12 +367,18 @@ class MultiheadAttention(nn.Module):
                     dim=1,
                 )
 
-        attn_weights = torch.bmm(q, k.transpose(1, 2))
+        #if self.encoder_decoder_attention:
+        #    import pdb; pdb.set_trace()
+        attn_weights = torch.bmm(q, k.transpose(1, 2)) # kbsz*num_heads, f, l
         attn_weights = MultiheadAttention.apply_sparse_mask(attn_weights, tgt_len, src_len, bsz)
 
-        assert list(attn_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
+        if flag_cascade:
+            assert list(attn_weights.size()) == [kbsz * self.num_heads, bsz//kbsz, src_len]
+        else:
+            assert list(attn_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
 
         if attn_mask is not None:
+            assert not flag_cascade
             attn_mask = attn_mask.unsqueeze(0)
             if self.self_attention:
                 if is_cascade: # TODO: fully batching in batch dimension
@@ -392,12 +451,19 @@ class MultiheadAttention(nn.Module):
             attn_weights[attn_mask.eq(-float('inf'))] = -float('inf')# += attn_mask
 
         if key_padding_mask is not None:
-            # don't attend to padding symbols
-            attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
-            attn_weights = attn_weights.masked_fill(
-                key_padding_mask.unsqueeze(1).unsqueeze(2).to(torch.bool), float("-inf")
-            )
-            attn_weights = attn_weights.view(bsz * self.num_heads, tgt_len, src_len)
+            # don't attend to padding symbols key_padding_mask: kbsz, 1, 1, src_len
+            if flag_cascade:
+                attn_weights = attn_weights.view(kbsz, self.num_heads, bsz//kbsz, src_len)
+                attn_weights = attn_weights.masked_fill(
+                    key_padding_mask.unsqueeze(1).unsqueeze(2).to(torch.bool), float("-inf")
+                )
+                attn_weights = attn_weights.view(kbsz * self.num_heads, bsz//kbsz, src_len)
+            else:
+                attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
+                attn_weights = attn_weights.masked_fill(
+                    key_padding_mask.unsqueeze(1).unsqueeze(2).to(torch.bool), float("-inf")
+                )
+                attn_weights = attn_weights.view(bsz * self.num_heads, tgt_len, src_len)
 
         if before_softmax:
             return attn_weights, v
@@ -413,7 +479,10 @@ class MultiheadAttention(nn.Module):
         )
         assert v is not None
         v[v.ne(v)] = 0.
-        attn = torch.bmm(attn_probs, v)
+        attn = torch.bmm(attn_probs, v) # kbsz*num_heads, bsz//kbsz, src_len
+        #prev_value = _prev_value.view(kbsz*self.num_heads, src_len, self.head_dim)
+        if flag_cascade:
+            attn = attn.contiguous().view(kbsz, self.num_heads, bsz//kbsz, self.head_dim).transpose(1, 2).contiguous().view(bsz*self.num_heads, 1, self.head_dim)
         assert list(attn.size()) == [bsz * self.num_heads, tgt_len, self.head_dim]
         if self.onnx_trace and attn.size(1) == 1:
             # when ONNX tracing a single decoder step (sequence length == 1)

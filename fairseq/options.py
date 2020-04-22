@@ -505,6 +505,12 @@ def add_generation_args(parser):
     # fmt: off
     group.add_argument('--beam', default=5, type=int, metavar='N',
                        help='beam size')
+    group.add_argument('--rounds', default=5, type=int, metavar='N',
+                       help='beam size')
+    group.add_argument('--cscore', default=0, type=int, metavar='N',
+                       help='beam size')
+    group.add_argument('--D', default=0, type=int, metavar='N',
+                       help='beam size')
     group.add_argument('--nbest', default=1, type=int, metavar='N',
                        help='number of hypotheses to output')
     group.add_argument('--max-len-a', default=0, type=float, metavar='N',

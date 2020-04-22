@@ -274,6 +274,7 @@ class TransformerDecoderLayer(nn.Module):
             and _self_attn_input_buffer is not None
             and "prev_key" in _self_attn_input_buffer
         ):
+            assert False
             if self_attn_mask is not None:
                 assert encoder_out is not None
                 self_attn_mask = torch.cat(
@@ -325,7 +326,7 @@ class TransformerDecoderLayer(nn.Module):
                     saved_state["prev_key_padding_mask"] = prev_attn_state[2]
                 assert incremental_state is not None
                 self.encoder_attn._set_input_buffer(incremental_state, saved_state)
-
+            #import pdb; pdb.set_trace()
             x, attn = self.encoder_attn(
                 query=x,
                 key=encoder_out,
@@ -377,8 +378,8 @@ class TransformerDecoderLayer(nn.Module):
         """Scriptable reorder incremental state in transformer layers."""
         self.self_attn.reorder_incremental_state(incremental_state, new_order)
 
-        if self.encoder_attn is not None:
-            self.encoder_attn.reorder_incremental_state(incremental_state, new_order)
+        #if self.encoder_attn is not None:
+        #    self.encoder_attn.reorder_incremental_state(incremental_state, new_order)
 
 
 def Linear(in_features, out_features, bias=True):
