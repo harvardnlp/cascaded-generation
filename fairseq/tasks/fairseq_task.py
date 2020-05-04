@@ -308,6 +308,8 @@ class FairseqTask(object):
             no_repeat_ngram_size=getattr(args, "no_repeat_ngram_size", 0),
             search_strategy=search_strategy,
             rounds=getattr(args, "rounds", None),
+            ngpus=getattr(args, "ngpus", 1),
+            timesx=getattr(args, "timesx", 1),
             cscore=getattr(args, "cscore", None),
             D=getattr(args, "D", None),
         )

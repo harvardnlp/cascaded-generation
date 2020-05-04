@@ -88,6 +88,12 @@ def _main(args, output_file):
     # (None if no unknown word replacement, empty if no path to align dictionary)
     align_dict = utils.load_align_dict(args.replace_unk)
 
+    shuffle_flag = False
+    if args.maxval>0:
+        shuffle_flag=True
+        seed = 1234
+    else:
+        seed = 1
     # Load dataset (possibly sharded)
     itr = task.get_batch_iterator(
         dataset=task.dataset(args.gen_subset),
@@ -102,7 +108,8 @@ def _main(args, output_file):
         num_shards=args.num_shards,
         shard_id=args.shard_id,
         num_workers=args.num_workers,
-    ).next_epoch_itr(shuffle=False)
+        seed=seed,
+    ).next_epoch_itr(shuffle=shuffle_flag)
     progress = progress_bar.progress_bar(
         itr,
         log_format=args.log_format,
@@ -133,7 +140,11 @@ def _main(args, output_file):
     num_sentences = 0
     has_target = True
     wps_meter = TimeMeter()
+    iii = 0
     for sample in progress:
+        iii += 1
+        if args.maxval>0 and iii > args.maxval:
+            break
         #import pdb; pdb.set_trace()
         sample = utils.move_to_cuda(sample) if use_cuda else sample
         if 'net_input' not in sample:
@@ -253,6 +264,7 @@ def _main(args, output_file):
     logger.info('NOTE: hypothesis and token scores are output in base 2')
     logger.info('Translated {} sentences ({} tokens) in {:.1f}s ({:.2f} sentences/s, {:.2f} tokens/s)'.format(
         num_sentences, gen_timer.n, gen_timer.sum, num_sentences / gen_timer.sum, 1. / gen_timer.avg))
+    logger.info('Latency {:.8f}'.format(1000*gen_timer.sum/num_sentences))
     if has_target:
         logger.info('Generate {} with beam={}: {}'.format(args.gen_subset, args.beam, scorer.result_string()))
 

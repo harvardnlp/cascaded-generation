@@ -503,9 +503,15 @@ def add_generation_args(parser):
     group = parser.add_argument_group("Generation")
     add_common_eval_args(group)
     # fmt: off
+    group.add_argument('--ngpus', default=1, type=int, metavar='N',
+                       help='beam size')
     group.add_argument('--beam', default=5, type=int, metavar='N',
                        help='beam size')
     group.add_argument('--rounds', default=5, type=int, metavar='N',
+                       help='beam size')
+    group.add_argument('--timesx', default=1, type=int, metavar='N',
+                       help='beam size')
+    group.add_argument('--maxval', default=0, type=int, metavar='N',
                        help='beam size')
     group.add_argument('--cscore', default=0, type=int, metavar='N',
                        help='beam size')

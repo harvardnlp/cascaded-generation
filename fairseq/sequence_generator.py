@@ -6,6 +6,8 @@
 import math
 
 import torch
+import torch.nn as nn
+from torch.cuda._utils import _get_device_index
 import torch_struct
 from fairseq import search, utils
 from fairseq.data import data_utils
@@ -15,7 +17,7 @@ import importlib.util
 spec = importlib.util.spec_from_file_location("get_fb", "/n/home11/yuntian/genbmm/opt/hmm.py")
 foo = importlib.util.module_from_spec(spec)
 import torch.cuda
-torch.cuda.synchronize()
+#torch.cuda.synchronize()
 spec.loader.exec_module(foo)
 fbs = {}
 total_num_valid = [0. for _ in range(5)]
@@ -40,8 +42,10 @@ class SequenceGenerator(object):
         no_repeat_ngram_size=0,
         search_strategy=None,
         rounds=None,
+        timesx=1,
         cscore=None,
         D=None,
+        ngpus=None,
         eos=None
     ):
         """Generates translations of a given source sentence.
@@ -68,7 +72,9 @@ class SequenceGenerator(object):
                 length (default: False)
         """
         #import pdb; pdb.set_trace()
+        self.ngpus = ngpus
         self.D = D
+        self.timesx = timesx
         self.pad = tgt_dict.pad()
         self.unk = tgt_dict.unk()
         self.eos = tgt_dict.eos() if eos is None else eos
@@ -88,6 +94,8 @@ class SequenceGenerator(object):
         self.match_source_len = match_source_len
         self.no_repeat_ngram_size = no_repeat_ngram_size
         self.cscore = cscore
+
+        self.replicas = None
 
         self.beam_sizes = '9:11:13:17:0'.split(':')
         self.beam_sizes = self.beam_sizes[:rounds]
@@ -129,8 +137,13 @@ class SequenceGenerator(object):
         ngram=None,
         **kwargs
     ):
-        assert not self.retain_dropout
         model.eval()
+        if self.ngpus > 1:
+            if not self.replicas:
+                devices = [torch.device(f'cuda:{gpu}') for gpu in range(self.ngpus)]
+                self.replicas = nn.parallel.replicate(model, devices)
+
+        assert not self.retain_dropout
         # model.forward normally channels prev_output_tokens into the decoder
         # separately, but SequenceGenerator directly calls model.encoder
         encoder_input = {
@@ -143,6 +156,8 @@ class SequenceGenerator(object):
         input_size = src_tokens.size()
         # batch dimension goes first followed by source lengths
         bsz = input_size[0]
+        if self.ngpus > 1:
+            assert bsz == 1, bsz
         src_len = input_size[1]
         beam_size = self.beam_size
 
@@ -156,12 +171,6 @@ class SequenceGenerator(object):
             )
         assert self.min_len <= max_len, 'min_len cannot be larger than max_len, please adjust these!'
 
-        # compute the encoder output for each beam
-        #import pdb; pdb.set_trace()
-        encoder_time_start = time.time()
-        encoder_outs = model.forward_encoder(encoder_input)
-        encoder_time = time.time() - encoder_time_start
-        time_spent['encoder_time'] += encoder_time
         padding_idx = 1
         #target_lengths = sample['target'].ne(padding_idx).long().sum(-1) # bsz
         target_lengths = src_lengths + 1
@@ -182,8 +191,45 @@ class SequenceGenerator(object):
             max_target_lengths = target_lengths + D
             min_target_lengths = target_lengths - D
             length = max_target_lengths.max().item() + 1
-
+        multigpu = False 
+        if self.ngpus > 1:
+            devices = [torch.device(f'cuda:{gpu}') for gpu in range(min(length, self.ngpus))]
+            if len(devices) > 1:
+                multigpu = True
         print ('here')
+        # compute the encoder output for each beam
+        #import pdb; pdb.set_trace()
+        encoder_time_start = time.time()
+        if not multigpu:
+            encoder_outs = model.forward_encoder(encoder_input)
+            encoder_time = time.time() - encoder_time_start
+            time_spent['encoder_time'] += encoder_time
+        else:
+            device_ids = list(map(lambda x: _get_device_index(x, True), devices))   
+            #import pdb; pdb.set_trace()
+            src_tokens = encoder_input['src_tokens']
+            src_lengths = encoder_input['src_lengths']
+            broadcast_time_start = time.time()
+            src_tokens_list = torch.cuda.comm.broadcast(src_tokens, device_ids)
+            src_lengths_list = torch.cuda.comm.broadcast(src_lengths, device_ids)
+            broadcast_time = time.time() - broadcast_time_start
+            time_spent['broadcast_time'] += broadcast_time 
+            encoder_input_list = [({'src_tokens': src_tokens, 'src_lengths': src_lengths}, True) for (src_tokens, src_lengths) in zip(src_tokens_list, src_lengths_list)]
+            def get_lambda(replica):
+                return lambda *x: replica.forward_encoder(*x)
+            replicas = [get_lambda(replica) for replica in self.replicas[:len(devices)]]
+            encoder_time_start = time.time()
+            encoder_outs_list = nn.parallel.parallel_apply(replicas, encoder_input_list)
+            encoder_time = time.time() - encoder_time_start
+            time_spent['encoder_time'] += encoder_time
+        if multigpu:
+            broadcast_time_start = time.time()
+            target_lengths_list = torch.cuda.comm.broadcast(target_lengths, device_ids)
+            broadcast_time = time.time() - broadcast_time_start
+            time_spent['broadcast_time'] += broadcast_time 
+            if self.D > 0:
+                max_target_lengths_list = torch.cuda.comm.broadcast(max_target_lengths, device_ids)
+                min_target_lengths_list = torch.cuda.comm.broadcast(min_target_lengths, device_ids)
         prev_beam_sizes = []
         all_tokens = []
 
@@ -200,13 +246,6 @@ class SequenceGenerator(object):
         debug_flag = False
         if debug_flag:
             import pdb; pdb.set_trace()
-            must = torch.LongTensor([[ 5280,  4859,  3306,    46,    33,    40,   378,   807,    54,     5, 2],
-                                 [   98,  1130,    62,    43,  3481,    10,  3225,    10,   650,     5, 2],
-                                 [16176,    84,   105,   122,    54, 12743,  4456,  8688, 10156,     5, 2],
-                                 [15340,   126,     9,   682,  8763,     4,  2946,    27,  5268,     5, 2],
-                                 [10785,  1965,   527,   171,  8375,    21,    10, 24735,   111,     5, 2],
-                                 [ 1066,  9176,    48,    57,    29,   127,  4623,  4901,   154,     5, 2],
-                                 [   58,  6577,    67,    28, 15294, 12019,  3566,   469,   608,  1006, 2]]).to(device)
             must = torch.LongTensor([[   58, 13292,    10, 27109, 16899,    48,   107,  4923,     9, 13292, 21, 27109, 16899,   500,   403,   814,  4923,    18,  2940,     5, 2],
                                      [ 1027,    54,  8190,  4071,    18,  2260,     4,    22,     9,   869, 33,     9,   606,    29,   500,  2818,    13,  2772, 13958,     5, 2],
                                      [ 3553,     4,  4437,    10,  4739,   105,   534,     4,    84,  6495, 9141,   411,   376,  3363,  1750,  6381,   783,    18,  3517,     5, 2],
@@ -218,41 +257,64 @@ class SequenceGenerator(object):
         for order, beam_size in enumerate(beam_sizes):
             beam_size = self.beam_size
             if order == 0:
+                beam_size = beam_size * self.timesx
                 #beam_size = 64
                 # goal: unigram_probs = torch.zeros(1, length, len(vocab))
                 prev_output_tokens = src_tokens.new(bsz*length, 1).fill_(0)
                 position = torch.arange(length).view(1, -1).repeat(bsz, 1) + 2
                 position = position.to(device).long().view(-1, 1)
                 forward_decoder_time_start = time.time()
-                lprobs, _ = model.forward_decoder(
-                    prev_output_tokens, encoder_outs, temperature=self.temperature, disable_incremental_states=False, ngram=order, is_cascade=True, position=position,
-                ) # bsz, V
-                forward_decoder_time = time.time() - forward_decoder_time_start
-                time_spent['forward_decoder_time'] += forward_decoder_time
 
-                masking_time_start = time.time()
-                unigram_probs = lprobs.view(bsz, length, -1).contiguous() # bsz, length, V
-                V = unigram_probs.size(-1)
-                # make sure length constraints are satisfied
-                ids = torch.arange(length).view(1, -1).expand(bsz, -1).to(device)
-                if self.D > 0:
-                    #unigram_probs[:, -2, 2] = 0 # </s> possible
-                    #unigram_probs[:, :, 1] = -float('inf') # cannot emit pad
-                    unigram_probs[ids.gt(max_target_lengths.view(-1, 1)-1)] = -float('inf') # max length constraint, pad after
-                    #unigram_probs[:, :, 1][ids.gt(target_lengths.view(-1, 1)-1)] = 0 # must be pad after max len
-                    #unigram_probs[:, -1] = -float('inf')
-                    unigram_probs[:, :, 1][ids.gt(min_target_lengths.view(-1,1)-1)] = 0 # pad possible everywhere after position 1, TODO: use window instead
-                    unigram_probs[:, :, 2][ids.le(max_target_lengths.view(-1, 1)-1) & ids.ge(min_target_lengths.view(-1,1)-1)] = 0 # </s> possible before max_len
-                    #unigram_probs[:, 1:, 2] = 0 # eos possible everywhere after position 1, TODO: use window instead
-                    #unigram_probs[:, -1, 1] = 0 # last position must be pad
 
-                if self.D == 0:
-                    unigram_probs[ids.ge(target_lengths.view(-1, 1)-1)] = -float('inf')
-                    unigram_probs[:, :, 2][ids.ge(target_lengths.view(-1, 1)-1)] = 0
-                    unigram_probs[:, :, 2][ids.lt(target_lengths.view(-1, 1)-1)] = -float('inf')
+                if multigpu:
+                    #import pdb; pdb.set_trace()
+                    chunk_size = length // len(devices)
+                    chunk_size_last = chunk_size + length - chunk_size * len(devices)
+                    chunk_sizes = [chunk_size if i<len(devices)-1 else chunk_size_last for i in range(len(devices))]
+                    prev_output_tokens_list = torch.cuda.comm.scatter(prev_output_tokens, device_ids, chunk_sizes=chunk_sizes, dim=0)
+                    position_list = torch.cuda.comm.scatter(position, device_ids, chunk_sizes=chunk_sizes, dim=0)
+                    decoder_input_list = zip(prev_output_tokens_list, encoder_outs_list, [self.temperature]*len(devices), [False]*len(devices), [order]*len(devices), [True]*len(devices), position_list)
+                    decoder_input_list = list(decoder_input_list)
+                    def get_lambda2(replica):
+                        return lambda *x: replica.forward_decoder(*x)[0]
+                    replicas = [get_lambda2(replica) for replica in self.replicas[:len(devices)]]
+                    lprobs_list = nn.parallel.parallel_apply(replicas, decoder_input_list)
+                    forward_decoder_time = time.time() - forward_decoder_time_start
+                    time_spent['forward_decoder_time'] += forward_decoder_time
 
-                if len(beam_sizes) == 1:
-                    tokens = unigram_probs.max(-1)[1] # bsz, L
+                    masking_time_start = time.time()
+                    #import pdb; pdb.set_trace()
+                    def get_lambda3(i):
+                        def f(lprobs):
+                            if self.D > 0:
+                                max_target_lengths = max_target_lengths_list[i]
+                                min_target_lengths = min_target_lengths_list[i]
+                            target_lengths = target_lengths_list[i]
+                            V = lprobs.size(-1)
+                            unigram_probs = lprobs.view(bsz, -1, V).contiguous() # bsz, length, V
+                            # make sure length constraints are satisfied
+                            ids = torch.arange(i*chunk_size, i*chunk_size + chunk_sizes[i], device=lprobs.device).view(1, -1).expand(bsz, -1)
+                            if self.D > 0:
+                                unigram_probs[ids.gt(max_target_lengths.view(-1, 1)-1)] = -float('inf') # max length constraint, pad after
+                                unigram_probs[:, :, 1][ids.gt(min_target_lengths.view(-1,1)-1)] = 0 # pad possible everywhere after position 1, TODO: use window instead
+                                unigram_probs[:, :, 2][ids.le(max_target_lengths.view(-1, 1)-1) & ids.ge(min_target_lengths.view(-1,1)-1)] = 0 # </s> possible before max_len
+
+                            if self.D == 0:
+                                unigram_probs[ids.ge(target_lengths.view(-1, 1)-1)] = -float('inf')
+                                unigram_probs[:, :, 2][ids.ge(target_lengths.view(-1, 1)-1)] = 0
+                                unigram_probs[:, :, 2][ids.lt(target_lengths.view(-1, 1)-1)] = -float('inf')
+                            if len(beam_sizes) == 1:
+                                tokens = unigram_probs.max(-1)[1]
+                                return tokens.view(-1)
+                            else:
+                                assert False
+                        return f
+                    replicas = [get_lambda3(i) for i in range(len(chunk_sizes))]
+                    tokens_list = nn.parallel.parallel_apply(replicas, lprobs_list)
+                    masking_time = time.time() - masking_time_start
+                    time_spent['masking_time'] += masking_time
+                    tokens = nn.parallel.gather(tokens_list, 0) # gather to cpus
+                    tokens = tokens.view(bsz, -1)
                     for i in range(bsz):
                         hypo = {
                             'tokens': tokens[i][tokens[i].ne(1)] if self.D>0 else tokens[i],
@@ -263,6 +325,46 @@ class SequenceGenerator(object):
                         }
                         finalized[i].append(hypo)
                     break
+                else:
+                    lprobs, _ = model.forward_decoder(
+                        prev_output_tokens, encoder_outs, temperature=self.temperature, disable_incremental_states=False, ngram=order, is_cascade=True, position=position,
+                    ) # bsz, V
+                    forward_decoder_time = time.time() - forward_decoder_time_start
+                    time_spent['forward_decoder_time'] += forward_decoder_time
+
+                    masking_time_start = time.time()
+                    unigram_probs = lprobs.view(bsz, length, -1).contiguous() # bsz, length, V
+                    V = unigram_probs.size(-1)
+                    # make sure length constraints are satisfied
+                    ids = torch.arange(length).view(1, -1).expand(bsz, -1).to(device)
+                    if self.D > 0:
+                        #unigram_probs[:, -2, 2] = 0 # </s> possible
+                        #unigram_probs[:, :, 1] = -float('inf') # cannot emit pad
+                        unigram_probs[ids.gt(max_target_lengths.view(-1, 1)-1)] = -float('inf') # max length constraint, pad after
+                        #unigram_probs[:, :, 1][ids.gt(target_lengths.view(-1, 1)-1)] = 0 # must be pad after max len
+                        #unigram_probs[:, -1] = -float('inf')
+                        unigram_probs[:, :, 1][ids.gt(min_target_lengths.view(-1,1)-1)] = 0 # pad possible everywhere after position 1, TODO: use window instead
+                        unigram_probs[:, :, 2][ids.le(max_target_lengths.view(-1, 1)-1) & ids.ge(min_target_lengths.view(-1,1)-1)] = 0 # </s> possible before max_len
+                        #unigram_probs[:, 1:, 2] = 0 # eos possible everywhere after position 1, TODO: use window instead
+                        #unigram_probs[:, -1, 1] = 0 # last position must be pad
+
+                    if self.D == 0:
+                        unigram_probs[ids.ge(target_lengths.view(-1, 1)-1)] = -float('inf')
+                        unigram_probs[:, :, 2][ids.ge(target_lengths.view(-1, 1)-1)] = 0
+                        unigram_probs[:, :, 2][ids.lt(target_lengths.view(-1, 1)-1)] = -float('inf')
+
+                    if len(beam_sizes) == 1:
+                        tokens = unigram_probs.max(-1)[1] # bsz, L
+                        for i in range(bsz):
+                            hypo = {
+                                'tokens': tokens[i][tokens[i].ne(1)] if self.D>0 else tokens[i],
+                                'score': 0,
+                                'attention': None,  # src_len x tgt_len
+                                'alignment': None,
+                                'positional_scores': torch.zeros(1),
+                            }
+                            finalized[i].append(hypo)
+                        break
                 masking_time = time.time() - masking_time_start
                 time_spent['masking_time'] += masking_time
 
@@ -288,10 +390,10 @@ class SequenceGenerator(object):
                 new_order = torch.arange(bsz*length).view(-1, 1).repeat(1, beam_size).view(-1)
                 new_order = new_order.to(device).long()
                 #encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
-                reorder_time_start = time.time()
+                #reorder_time_start = time.time()
                 model.reorder_incremental_state(new_order)
-                reorder_time = time.time() - reorder_time_start
-                time_spent['reorder_time'] += reorder_time
+                #reorder_time = time.time() - reorder_time_start
+                #time_spent['reorder_time'] += reorder_time
                 position = position.view(-1, 1).repeat(1, beam_size).view(-1, 1)
                 prev_beam_sizes.append(beam_size)
             else:
@@ -301,14 +403,14 @@ class SequenceGenerator(object):
                 prev_position = position
                 position = prev_position[:,-1:].add(1) # -1, 1
                 position = torch.cat([prev_position, position], -1) # bsz* L* K, order
-                forward_decoder_time_start = time.time()
+                #forward_decoder_time_start = time.time()
                 lprobs, _ = model.forward_decoder(
                     prev_output_tokens, encoder_outs, temperature=self.temperature, disable_incremental_states=False, ngram=order, is_cascade=True, position=position,
                 ) # bsz, V
-                forward_decoder_time = time.time() - forward_decoder_time_start
-                time_spent['forward_decoder_time'] += forward_decoder_time
+                #forward_decoder_time = time.time() - forward_decoder_time_start
+                #time_spent['forward_decoder_time'] += forward_decoder_time
 
-                masking_time_start = time.time()
+                #masking_time_start = time.time()
                 ngram_probs = lprobs.view(bsz, length-order+1, prev_beam_sizes[-1], -1).contiguous() # bsz, length, K, V
                 ngram_probs = ngram_probs[:, :-1] # bsz, length-1, K, V
                 #import pdb; pdb.set_trace()
@@ -344,9 +446,9 @@ class SequenceGenerator(object):
                 ngram_probs = next_scores # bsz, length-1, K, K
                 total_num_valid[order] += ngram_probs.ne(-float('inf')).float().sum().item()
                 total_num_total[order] += ngram_probs.view(-1).size(0)
-                masking_time = time.time() - masking_time_start 
-                time_spent['masking_time'] += masking_time
-                print ('order', order, 'percent', total_num_valid[order]/total_num_total[order], 'valid', total_num_valid[order], 'total', total_num_total[order])
+                #masking_time = time.time() - masking_time_start 
+                #time_spent['masking_time'] += masking_time
+                print (f'percent order {order} ', total_num_valid[order]/total_num_total[order], 'valid', total_num_valid[order], 'total', total_num_total[order])
 
                 #import pdb; pdb.set_trace()
                 if order != len(beam_sizes)-1:
@@ -356,17 +458,17 @@ class SequenceGenerator(object):
                     fb = fbs[ngram_probs.size(-1)]
                     #edge_marginals = dist.marginals # 1, length-2, K, K
                     #edge_max_marginals = dist.max_marginals # 1, length-2, K, K
-                    if self.cscore == -9 and length > 10:
-                        import pdb; pdb.set_trace()
+                    if self.cscore == -9:
                         dist = torch_struct.LinearChainCRF(ngram_probs.transpose(-1,-2))
                         counts = dist.count
+                        print (f'count order {order} ', counts)
                     with torch.no_grad():
 
                         #edge_max_marginals = fb(ngram_probs.transpose(0, 1).contiguous()).cpu() # bsz, length-1, K, K
-                        marginal_time_start = time.time()
+                        #marginal_time_start = time.time()
                         edge_max_marginals = fb(ngram_probs.transpose(0, 1).contiguous()) # bsz, length-1, K, K
-                        marginal_time = time.time() - marginal_time_start
-                        time_spent['marginal_time'] += marginal_time
+                        #marginal_time = time.time() - marginal_time_start
+                        #time_spent['marginal_time'] += marginal_time
                         edge_marginals = edge_max_marginals.transpose(0, 1).contiguous() # bsz, length-1, K, K
                         scores, mapping = torch.topk(edge_marginals.view(bsz, length-order, -1), beam_size, -1) # bsz, length-1, beam_size
                         # scores: 1, L-1, 500
@@ -384,12 +486,12 @@ class SequenceGenerator(object):
                         tmp = tmp.to(device).view(1, -1, 1) # 1, length-1, 1
                         new_order = new_order + tmp + x_idx0 # bsz, length-1, K2
                         new_order = new_order.long().view(-1)
-                        reorder_time_start = time.time()
+                        #reorder_time_start = time.time()
                         position = position.index_select(0, new_order) # bsz*length-1*K2, order
                         #encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
                         model.reorder_incremental_state(new_order)
-                        reorder_time = time.time() - reorder_time_start
-                        time_spent['reorder_time'] += reorder_time
+                        #reorder_time = time.time() - reorder_time_start
+                        #time_spent['reorder_time'] += reorder_time
 
 
                     prev_mapping = all_tokens[-1].to(device) # bsz, L, K1, order
@@ -429,11 +531,11 @@ class SequenceGenerator(object):
                     ngram_probs = ngram_probs
                     dist = torch_struct.LinearChainCRF(ngram_probs)
                     argmax = dist.argmax.transpose(-1,-2) # bsz, l, K, K
-                    if bsz>1:
+                    if self.cscore == -4:
                         max_score = dist.max
-                    if self.cscore == -9 and length > 10:
-                        import pdb; pdb.set_trace()
+                    if self.cscore == -9:
                         counts = dist.count
+                        print (f'count order {order} ', counts)
                     K = argmax.size(-1)
                     argmax = argmax.contiguous().view(bsz, argmax.size(1), -1)
                     max_ids = argmax.max(-1)[1] # bsz, l
@@ -453,10 +555,10 @@ class SequenceGenerator(object):
                     for i in range(bsz):
                         hypo = {
                             'tokens': tokens[i][tokens[i].ne(1)] if self.D>0 else tokens[i],
-                            'score': max_score[i] if bsz>1 else 0.,
+                            'score': max_score[i] if self.cscore==-4 else 0.,
                             'attention': None,  # src_len x tgt_len
                             'alignment': None,
-                            'positional_scores': torch.Tensor([max_score[i].item() if bsz>1 else 0.]),
+                            'positional_scores': torch.Tensor([max_score[i].item() if self.cscore==-4 else 0.]),
                         }
                         finalized[i].append(hypo)
 
@@ -907,9 +1009,11 @@ class EnsembleModel(torch.nn.Module):
         return min(m.max_decoder_positions() for m in self.models)
 
     @torch.no_grad()
-    def forward_encoder(self, encoder_input):
+    def forward_encoder(self, encoder_input, clear_decoder=False):
         if not self.has_encoder():
             return None
+        if clear_decoder:
+            self.incremental_states = {}
         return [model.encoder(**encoder_input) for model in self.models]
 
     @torch.no_grad()
@@ -962,8 +1066,11 @@ class EnsembleModel(torch.nn.Module):
         if disable_incremental_states:
             self.incremental_states = None
         if self.incremental_states is not None:
+            if model not in self.incremental_states:
+                self.incremental_states = {model: {}}
+            incremental_state = self.incremental_states[model]
             decoder_out = list(model.forward_decoder(
-                tokens, encoder_out=encoder_out, incremental_state=self.incremental_states[model], ngram=ngram, is_translate=True, is_cascade=is_cascade, position=position,
+                tokens, encoder_out=encoder_out, incremental_state=incremental_state, ngram=ngram, is_translate=True, is_cascade=is_cascade, position=position,
             ))
             #assert False, 'here'
         else:
