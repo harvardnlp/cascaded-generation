@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
-
+import genbmm
 import torch
 import torch.nn as nn
 from torch.cuda._utils import _get_device_index
@@ -12,9 +12,8 @@ import torch_struct
 from fairseq import search, utils
 from fairseq.data import data_utils
 from fairseq.models import FairseqIncrementalDecoder
-
 import importlib.util
-spec = importlib.util.spec_from_file_location("get_fb", "/n/home11/yuntian/genbmm/opt/hmm.py")
+spec = importlib.util.spec_from_file_location("get_fb", "genbmm/opt/hmm.py")
 foo = importlib.util.module_from_spec(spec)
 import torch.cuda
 #torch.cuda.synchronize()
@@ -25,6 +24,38 @@ total_num_total = [0. for _ in range(5)]
 import collections
 import time
 time_spent = collections.defaultdict(float)
+def max_marginals(scores):
+    N_orig = scores.size(1)
+    l = math.log(N_orig, 2)
+    l = int(math.ceil(l))
+    N = 2 ** l
+    scores_new = scores.new(scores.size(0), N, scores.size(2), scores.size(3)).fill_(0)
+    scores_new[:, :N_orig] = scores
+    scores = scores_new
+    B, N, C, C = scores.shape
+    def combine(a, b):
+        return genbmm.maxbmm(a.view(-1, C, C).contiguous(),
+                             b.view(-1, C, C).contiguous()).view(B, -1, C, C)
+    N_sq = int(math.log(N, 2))
+    chart = scores
+    charts = []
+    charts.append(chart)
+    for i in range(1, N_sq+1):
+        chart = combine(chart[:, ::2], chart[:, 1::2])
+        charts.append(chart)
+    P, S = 0, 1
+    ps = torch.zeros(2, B, 1, C, C).cuda()
+    for i in range(N_sq-1, -1, -1):
+        ps2 = torch.zeros(2, B, int(2**(N_sq-i)), C, C).cuda()
+        ps2[P, :, ::2] = ps[P, :, :]
+        ps2[P, :, 1::2] = combine(ps[P, :, :], charts[i][:, ::2])
+        
+        ps2[S, :, ::2] = combine(charts[i][:, 1::2], ps[S, :, :])
+        ps2[S, :, 1::2] = ps[S, :, :]
+        ps = ps2
+    suffix = ps[S, :, :]
+    prefix = ps[P, :, :] 
+    return (prefix.max(-2, keepdim=True)[0] + scores.transpose(-2, -1) + suffix.max(-1, keepdim=True)[0])[:, :N_orig]
 class SequenceGenerator(object):
     def __init__(
         self,
@@ -44,6 +75,7 @@ class SequenceGenerator(object):
         rounds=None,
         timesx=1,
         cscore=None,
+        usenew=1,
         D=None,
         ngpus=None,
         eos=None
@@ -72,7 +104,9 @@ class SequenceGenerator(object):
                 length (default: False)
         """
         #import pdb; pdb.set_trace()
+        self.usenew = usenew
         self.ngpus = ngpus
+        self.to_dump = []
         self.D = D
         self.timesx = timesx
         self.pad = tgt_dict.pad()
@@ -189,7 +223,7 @@ class SequenceGenerator(object):
             #D = 2 # -33.26 D=2 -36.53 D=0
             D = self.D
             max_target_lengths = target_lengths + D
-            min_target_lengths = target_lengths - D
+            min_target_lengths = target_lengths - D # TODO
             length = max_target_lengths.max().item() + 1
         multigpu = False 
         if self.ngpus > 1:
@@ -390,10 +424,10 @@ class SequenceGenerator(object):
                 new_order = torch.arange(bsz*length).view(-1, 1).repeat(1, beam_size).view(-1)
                 new_order = new_order.to(device).long()
                 #encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
-                #reorder_time_start = time.time()
+                reorder_time_start = time.time()
                 model.reorder_incremental_state(new_order)
-                #reorder_time = time.time() - reorder_time_start
-                #time_spent['reorder_time'] += reorder_time
+                reorder_time = time.time() - reorder_time_start
+                time_spent['reorder_time'] += reorder_time
                 position = position.view(-1, 1).repeat(1, beam_size).view(-1, 1)
                 prev_beam_sizes.append(beam_size)
             else:
@@ -403,14 +437,14 @@ class SequenceGenerator(object):
                 prev_position = position
                 position = prev_position[:,-1:].add(1) # -1, 1
                 position = torch.cat([prev_position, position], -1) # bsz* L* K, order
-                #forward_decoder_time_start = time.time()
+                forward_decoder_time_start = time.time()
                 lprobs, _ = model.forward_decoder(
                     prev_output_tokens, encoder_outs, temperature=self.temperature, disable_incremental_states=False, ngram=order, is_cascade=True, position=position,
                 ) # bsz, V
-                #forward_decoder_time = time.time() - forward_decoder_time_start
-                #time_spent['forward_decoder_time'] += forward_decoder_time
+                forward_decoder_time = time.time() - forward_decoder_time_start
+                time_spent['forward_decoder_time'] += forward_decoder_time
 
-                #masking_time_start = time.time()
+                masking_time_start = time.time()
                 ngram_probs = lprobs.view(bsz, length-order+1, prev_beam_sizes[-1], -1).contiguous() # bsz, length, K, V
                 ngram_probs = ngram_probs[:, :-1] # bsz, length-1, K, V
                 #import pdb; pdb.set_trace()
@@ -446,16 +480,17 @@ class SequenceGenerator(object):
                 ngram_probs = next_scores # bsz, length-1, K, K
                 total_num_valid[order] += ngram_probs.ne(-float('inf')).float().sum().item()
                 total_num_total[order] += ngram_probs.view(-1).size(0)
-                #masking_time = time.time() - masking_time_start 
+                masking_time = time.time() - masking_time_start 
                 #time_spent['masking_time'] += masking_time
                 print (f'percent order {order} ', total_num_valid[order]/total_num_total[order], 'valid', total_num_valid[order], 'total', total_num_total[order])
 
                 #import pdb; pdb.set_trace()
                 if order != len(beam_sizes)-1:
                     #dist = torch_struct.LinearChainCRF(ngram_probs)
-                    if ngram_probs.size(-1) not in fbs:
-                        fbs[ngram_probs.size(-1)] = foo.fb_max(ngram_probs.size(-1))
-                    fb = fbs[ngram_probs.size(-1)]
+                    if self.usenew == 0:
+                       if ngram_probs.size(-1) not in fbs:
+                           fbs[ngram_probs.size(-1)] = foo.fb_max(ngram_probs.size(-1))
+                       fb = fbs[ngram_probs.size(-1)]
                     #edge_marginals = dist.marginals # 1, length-2, K, K
                     #edge_max_marginals = dist.max_marginals # 1, length-2, K, K
                     if self.cscore == -9:
@@ -465,11 +500,17 @@ class SequenceGenerator(object):
                     with torch.no_grad():
 
                         #edge_max_marginals = fb(ngram_probs.transpose(0, 1).contiguous()).cpu() # bsz, length-1, K, K
-                        #marginal_time_start = time.time()
-                        edge_max_marginals = fb(ngram_probs.transpose(0, 1).contiguous()) # bsz, length-1, K, K
-                        #marginal_time = time.time() - marginal_time_start
-                        #time_spent['marginal_time'] += marginal_time
-                        edge_marginals = edge_max_marginals.transpose(0, 1).contiguous() # bsz, length-1, K, K
+                        marginal_time_start = time.time()
+                        if self.usenew == 0:
+                            edge_max_marginals = fb(ngram_probs.transpose(0, 1).contiguous()) # bsz, length-1, K, K
+                            edge_marginals = edge_max_marginals.transpose(0, 1).contiguous() # bsz, length-1, K, K
+                        else:
+                        #self.to_dump.append(ngram_probs.cpu().clone())
+                            edge_max_marginals = max_marginals(ngram_probs)
+                            edge_marginals = edge_max_marginals.contiguous().transpose(-1, -2).contiguous()
+
+                        marginal_time = time.time() - marginal_time_start
+                        time_spent['marginal_time'] += marginal_time
                         scores, mapping = torch.topk(edge_marginals.view(bsz, length-order, -1), beam_size, -1) # bsz, length-1, beam_size
                         # scores: 1, L-1, 500
                         mapping2 = mapping.to(device) #bsz,  length-1, K2
@@ -486,12 +527,12 @@ class SequenceGenerator(object):
                         tmp = tmp.to(device).view(1, -1, 1) # 1, length-1, 1
                         new_order = new_order + tmp + x_idx0 # bsz, length-1, K2
                         new_order = new_order.long().view(-1)
-                        #reorder_time_start = time.time()
+                        reorder_time_start = time.time()
                         position = position.index_select(0, new_order) # bsz*length-1*K2, order
                         #encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
                         model.reorder_incremental_state(new_order)
-                        #reorder_time = time.time() - reorder_time_start
-                        #time_spent['reorder_time'] += reorder_time
+                        reorder_time = time.time() - reorder_time_start
+                        time_spent['reorder_time'] += reorder_time
 
 
                     prev_mapping = all_tokens[-1].to(device) # bsz, L, K1, order
