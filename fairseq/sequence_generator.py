@@ -75,7 +75,7 @@ class SequenceGenerator(object):
         rounds=None,
         timesx=1,
         cscore=None,
-        usenew=1,
+        usenew=0,
         D=None,
         ngpus=None,
         eos=None
@@ -223,7 +223,9 @@ class SequenceGenerator(object):
             #D = 2 # -33.26 D=2 -36.53 D=0
             D = self.D
             max_target_lengths = target_lengths + D
-            min_target_lengths = target_lengths - D # TODO
+            min_target_lengths = target_lengths - D 
+            min_target_lengths = min_target_lengths.clamp(min=2) # always produce sth
+            max_target_lengths = torch.max(min_target_lengths, max_target_lengths)
             length = max_target_lengths.max().item() + 1
         multigpu = False 
         if self.ngpus > 1:

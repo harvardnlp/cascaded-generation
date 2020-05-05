@@ -311,7 +311,7 @@ class FairseqTask(object):
             ngpus=getattr(args, "ngpus", 1),
             timesx=getattr(args, "timesx", 1),
             cscore=getattr(args, "cscore", None),
-            usenew=getattr(args, "usenew", 1),
+            usenew=getattr(args, "usenew", 0),
             D=getattr(args, "D", None),
         )
 

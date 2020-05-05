@@ -513,7 +513,7 @@ def add_generation_args(parser):
                        help='beam size')
     group.add_argument('--maxval', default=0, type=int, metavar='N',
                        help='beam size')
-    group.add_argument('--usenew', default=1, type=int, metavar='N',
+    group.add_argument('--usenew', default=0, type=int, metavar='N',
                        help='beam size')
     group.add_argument('--cscore', default=0, type=int, metavar='N',
                        help='beam size')
