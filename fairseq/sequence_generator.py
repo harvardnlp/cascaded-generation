@@ -211,9 +211,9 @@ class SequenceGenerator(object):
         print ('max',target_lengths.max())
         #if target_lengths.max() > 100:
         #    target_lengths = target_lengths.clamp(max=30)
-        if target_lengths.max() > 60:
-            print ('warning', '*'*55)
-            target_lengths = target_lengths.clamp(max=60)
+        #if target_lengths.max() > 60:
+        #    print ('warning', '*'*55)
+        #    target_lengths = target_lengths.clamp(max=60)
 
 
 
