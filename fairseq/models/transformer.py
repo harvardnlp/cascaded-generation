@@ -250,7 +250,6 @@ class TransformerModel(FairseqEncoderDecoderModel):
         features_only: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
-        ngram: Optional[int] = None,
     ):
         """
         Run the forward pass for an encoder-decoder model.
@@ -272,7 +271,6 @@ class TransformerModel(FairseqEncoderDecoderModel):
             alignment_heads=alignment_heads,
             src_lengths=src_lengths,
             return_all_hiddens=return_all_hiddens,
-            ngram=ngram,
         )
         return decoder_out
 
@@ -337,7 +335,6 @@ class TransformerAlignModel(TransformerModel):
         encoder_out=None,
         incremental_state=None,
         features_only=False,
-        ngram=None,
         is_translate=False,
         is_cascade=False,
         **extra_args,
@@ -346,7 +343,7 @@ class TransformerAlignModel(TransformerModel):
             "alignment_layer": self.alignment_layer,
             "alignment_heads": self.alignment_heads,
         }
-        decoder_out = self.decoder(prev_output_tokens, encoder_out, ngram=ngram, is_translate=is_translate, is_cascade=is_cascade, **attn_args)
+        decoder_out = self.decoder(prev_output_tokens, encoder_out, is_translate=is_translate, is_cascade=is_cascade, **attn_args)
 
         if self.full_context_alignment:
             attn_args["full_context_alignment"] = self.full_context_alignment
@@ -609,6 +606,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         self.args = args
         super().__init__(dictionary)
         self.register_buffer("version", torch.Tensor([3]))
+        self.ngrams = args.ngrams
         self._future_mask = torch.empty(0)
 
         self.dropout = args.dropout
@@ -702,7 +700,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         features_only: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
-        ngram: Optional[int] = None,
         is_translate: Optional[bool] = False,
         is_cascade: Optional[bool] = False,
         position: Optional[Tensor] = None,
@@ -731,7 +728,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             incremental_state=incremental_state,
             alignment_layer=alignment_layer,
             alignment_heads=alignment_heads,
-            ngram=ngram,
             is_translate=is_translate,
             is_cascade=is_cascade,
             position=position,
@@ -748,7 +744,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         full_context_alignment: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
-        ngram: Optional[int] = None,
         is_translate: Optional[bool] = False,
         is_cascade: Optional[bool] = False,
         position: Optional[Tensor] = None,
@@ -762,7 +757,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         if is_cascade:
             offset = None
         elif self.training:
-            NGRAM = 5
+            assert self.ngrams == 5, self.ngrams
+            NGRAM = self.ngrams
             offset = torch.randint(0, NGRAM, (bsz,)).to(prev_output_tokens.device).view(bsz, 1)
             ids = torch.arange(tgt_length).view(1, -1).expand(bsz, -1).to(prev_output_tokens.device) # bsz, tgt_length
             ids = ids + NGRAM - offset # bsz, tgt_length
@@ -772,6 +768,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             prev_output_tokens[ids.eq(0)] = bos
             offset = offset.view(bsz, 1, 1).contiguous()
         elif is_translate:
+            assert False
             offset = None
             #import pdb; pdb.set_trace()
             if ngram+1 <= prev_output_tokens.size(1):
@@ -779,7 +776,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         else:
             #import pdb; pdb.set_trace()
             offset = None
-            NGRAM = ngram + 1
+            NGRAM = self.ngrams
             ids = torch.arange(tgt_length).view(1, -1).expand(bsz, -1).to(prev_output_tokens.device) # bsz, tgt_length
             ids = ids + NGRAM # bsz, tgt_length
             ids = ids.fmod(NGRAM)
@@ -880,14 +877,25 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                     self_attn_padding_mask=self_attn_padding_mask,
                     need_attn=bool((idx == alignment_layer)),
                     need_head_weights=bool((idx == alignment_layer)),
-                    ngram=ngram,
                     is_translate=is_translate,
                     is_cascade=is_cascade,
                     offset=offset,
                 )
                 if x[-1].ne(x[-1]).any():
-                    import pdb; pdb.set_trace()
+                    print (x[-1].size())
+                    print (x[-1])
                     print (idx)
+                    print(bsz)
+                    print(tgt_length)
+                    print (prev_output_tokens)
+                    print (is_cascade)
+                    print (incremental_state)
+                    print (is_translate)
+                    print (offset)
+                    print (self_attn_padding_mask)
+                    print (self_attn_mask)
+                    print (self.training)
+                    import pdb; pdb.set_trace()
                 inner_states.append(x)
                 if layer_attn is not None and idx == alignment_layer:
                     attn = layer_attn.float().to(x)

@@ -55,6 +55,7 @@ class Trainer(object):
         self._model = self._model.to(device=self.device)
 
         self._dummy_batch = "DUMMY"  # indicates we don't have a dummy batch at first
+        self._dummy_batch_valid = "DUMMY"  # indicates we don't have a dummy batch at first
         self._lr_scheduler = None
         self._num_updates = 0
         self._optim_history = None
@@ -459,10 +460,10 @@ class Trainer(object):
         return logging_output
 
     @metrics.aggregate("valid")
-    def valid_step(self, sample, raise_oom=False, ngram=None):
+    def valid_step(self, sample, raise_oom=False, validation_topk=None, validation_D=None, validation_rounds=None):
         """Do forward pass in evaluation mode."""
-        if self._dummy_batch == "DUMMY":
-            self._dummy_batch = sample
+        if self._dummy_batch_valid == "DUMMY":
+            self._dummy_batch_valid = sample
 
         with torch.no_grad():
             self.model.eval()
@@ -470,14 +471,14 @@ class Trainer(object):
 
             sample = self._prepare_sample(sample)
             if sample is None:
-                sample = self._prepare_sample(self._dummy_batch)
+                sample = self._prepare_sample(self._dummy_batch_valid)
                 is_dummy_batch = True
             else:
                 is_dummy_batch = False
 
             try:
                 _loss, sample_size, logging_output = self.task.valid_step(
-                    sample, self.model, self.criterion, ngram=ngram
+                    sample, self.model, self.criterion, validation_topk=validation_topk, validation_D=validation_D, validation_rounds=validation_rounds,
                 )
             except RuntimeError as e:
                 if "out of memory" in str(e):

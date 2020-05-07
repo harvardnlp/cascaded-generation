@@ -108,7 +108,6 @@ class MultiheadAttention(nn.Module):
         query,
         key: Optional[Tensor],
         value: Optional[Tensor],
-        ngram: Optional[int] = None,
         is_translate: Optional[bool] = False,
         is_cascade: Optional[bool] = False,
         offset: Optional[Tensor] = None,
@@ -378,6 +377,7 @@ class MultiheadAttention(nn.Module):
             assert list(attn_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
 
         if attn_mask is not None:
+            attn_mask = attn_mask.data.clone()
             assert not flag_cascade
             attn_mask = attn_mask.unsqueeze(0)
             if self.self_attention:
@@ -414,7 +414,7 @@ class MultiheadAttention(nn.Module):
                     #attn_mask[:, :, 0] = 0
                     attn_mask = attn_mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1).contiguous().view(-1, attn_mask.size(-1), attn_mask.size(-1)) # bsz, 1, 16, 16
                 elif not is_translate:
-                    NGRAM = ngram + 1# validation
+                    NGRAM = 5# validation
                     attn_mask = attn_mask.expand(bsz, -1, -1).contiguous()
                     assert attn_mask.size(-1) == attn_mask.size(-2), attn_mask.size()
                     x, y = torch.meshgrid(torch.arange(attn_mask.size(-1)).to(attn_mask.device), torch.arange(attn_mask.size(-1)).to(attn_mask.device)) 
@@ -429,7 +429,7 @@ class MultiheadAttention(nn.Module):
                     #attn_mask[:, :, 0] = 0
                     attn_mask = attn_mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1).contiguous().view(-1, attn_mask.size(-1), attn_mask.size(-1)) # bsz, 1, 16, 16
                 else:
-                    NGRAM = ngram+1 # validation
+                    NGRAM = 5 # validation
                     attn_mask = attn_mask.expand(bsz, -1, -1).contiguous()
                     attn_mask.fill_(-float('inf'))
                     i = 1

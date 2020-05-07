@@ -330,9 +330,12 @@ def add_dataset_args(parser, train=False, gen=False):
         group.add_argument('--max-tokens-valid', type=int, metavar='N',
                            help='maximum number of tokens in a validation batch'
                                 ' (defaults to --max-tokens)')
-        group.add_argument('--max-sentences-valid', type=int, metavar='N',
+        group.add_argument('--max-sentences-valid', type=int, default=1,  metavar='N',
                            help='maximum number of sentences in a validation batch'
-                                ' (defaults to --max-sentences)')
+                                ' (defaults to 1)')
+        group.add_argument('--validation-max-size', type=int, default=0,  metavar='N',
+                           help='maximum number of sentences in a validation batch'
+                                ' (defaults to 0 (None))')
         group.add_argument('--curriculum', default=0, type=int, metavar='N',
                            help='don\'t shuffle batches for first N epochs')
     if gen:
@@ -387,6 +390,15 @@ def add_distributed_training_args(parser):
     group.add_argument('--broadcast-buffers', default=False, action='store_true',
                        help='Copy non-trainable parameters between GPUs, such as '
                       'batchnorm population statistics')
+    group.add_argument('--validation-topk', type=int, default=16,  metavar='N',
+                       help='maximum number of sentences in a validation batch'
+                            ' (defaults to 16)')
+    group.add_argument('--validation-D', type=int, default=3,  metavar='N',
+                       help='maximum number of sentences in a validation batch'
+                            ' (defaults to 16)')
+    group.add_argument('--validation-rounds', type=int, default=5,  metavar='N',
+                       help='maximum number of sentences in a validation batch'
+                            ' (defaults to 5)')
     # fmt: on
     return group
 
@@ -507,11 +519,13 @@ def add_generation_args(parser):
                        help='beam size')
     group.add_argument('--beam', default=5, type=int, metavar='N',
                        help='beam size')
+    group.add_argument('--ngram', default=4, type=int, metavar='N',
+                       help='beam size')
     group.add_argument('--rounds', default=5, type=int, metavar='N',
                        help='beam size')
     group.add_argument('--timesx', default=1, type=int, metavar='N',
                        help='beam size')
-    group.add_argument('--maxval', default=0, type=int, metavar='N',
+    group.add_argument('--max-size', default=0, type=int, metavar='N',
                        help='beam size')
     group.add_argument('--usenew', default=0, type=int, metavar='N',
                        help='beam size')
@@ -521,10 +535,10 @@ def add_generation_args(parser):
                        help='beam size')
     group.add_argument('--nbest', default=1, type=int, metavar='N',
                        help='number of hypotheses to output')
-    group.add_argument('--max-len-a', default=0, type=float, metavar='N',
+    group.add_argument('--max-len-a', default=1, type=float, metavar='N',
                        help=('generate sequences of maximum length ax + b, '
                              'where x is the source length'))
-    group.add_argument('--max-len-b', default=200, type=int, metavar='N',
+    group.add_argument('--max-len-b', default=0, type=int, metavar='N',
                        help=('generate sequences of maximum length ax + b, '
                              'where x is the source length'))
     group.add_argument('--min-len', default=1, type=float, metavar='N',
@@ -610,6 +624,8 @@ def add_model_args(parser):
     # 1) model defaults (lowest priority)
     # 2) --arch argument
     # 3) --encoder/decoder-* arguments (highest priority)
+    group.add_argument('--ngrams', default=5, type=int, metavar='N',
+                       help='read this many sentences into a buffer before processing them')
     from fairseq.models import ARCH_MODEL_REGISTRY
     group.add_argument('--arch', '-a', default='fconv', metavar='ARCH',
                        choices=ARCH_MODEL_REGISTRY.keys(),

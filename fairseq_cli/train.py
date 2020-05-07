@@ -248,53 +248,61 @@ def get_training_stats(stats):
 def validate(args, trainer, task, epoch_itr, subsets):
     """Evaluate the model on the validation set(s) and return the losses."""
 
-    ngrams = 5
-    for ngram in range(ngrams):
-        if args.fixed_validation_seed is not None:
-            # set fixed seed for every validation
-            utils.set_torch_seed(args.fixed_validation_seed)
+    assert args.max_sentences_valid == 1, 'Val only supports batch size 1!'
+    if args.fixed_validation_seed is not None:
+        # set fixed seed for every validation
+        utils.set_torch_seed(args.fixed_validation_seed)
 
-        valid_losses = []
-        for subset in subsets:
-            # Initialize data iterator
-            itr = task.get_batch_iterator(
-                dataset=task.dataset(subset),
-                max_tokens=args.max_tokens_valid,
-                max_sentences=args.max_sentences_valid,
-                max_positions=utils.resolve_max_positions(
-                    task.max_positions(),
-                    trainer.get_model().max_positions(),
-                ),
-                ignore_invalid_inputs=args.skip_invalid_size_inputs_valid_test,
-                required_batch_size_multiple=args.required_batch_size_multiple,
-                seed=args.seed,
-                num_shards=args.distributed_world_size,
-                shard_id=args.distributed_rank,
-                num_workers=args.num_workers,
-            ).next_epoch_itr(shuffle=False)
-            progress = progress_bar.progress_bar(
-                itr,
-                log_format=args.log_format,
-                log_interval=args.log_interval,
-                epoch=epoch_itr.epoch,
-                prefix=f"valid on '{subset}-ngram: {ngram}' subset",
-                tensorboard_logdir=(
-                    args.tensorboard_logdir if distributed_utils.is_master(args) else None
-                ),
-                default_log_format=('tqdm' if not args.no_progress_bar else 'simple'),
-            )
+    valid_losses = []
+    shuffle = False
+    if args.validation_max_size > 0:
+        logging.info(f'Validation set truncated to {args.validation_max_size}.')
+        shuffle = True
+        assert args.seed == 1234, args.seed
+    for subset in subsets:
+        # Initialize data iterator
+        itr = task.get_batch_iterator(
+            dataset=task.dataset(subset),
+            max_tokens=args.max_tokens_valid,
+            max_sentences=args.max_sentences_valid,
+            max_positions=utils.resolve_max_positions(
+                task.max_positions(),
+                trainer.get_model().max_positions(),
+            ),
+            ignore_invalid_inputs=args.skip_invalid_size_inputs_valid_test,
+            required_batch_size_multiple=1,#args.required_batch_size_multiple,
+            seed=args.seed,
+            num_shards=args.distributed_world_size,
+            shard_id=args.distributed_rank,
+            num_workers=args.num_workers,
+        ).next_epoch_itr(shuffle=shuffle)
+        progress = progress_bar.progress_bar(
+            itr,
+            log_format=args.log_format,
+            log_interval=args.log_interval,
+            epoch=epoch_itr.epoch,
+            prefix=f"valid on '{subset}' subset",
+            tensorboard_logdir=(
+                args.tensorboard_logdir if distributed_utils.is_master(args) else None
+            ),
+            default_log_format=('tqdm' if not args.no_progress_bar else 'simple'),
+        )
 
-            # create a new root metrics aggregator so validation metrics
-            # don't pollute other aggregators (e.g., train meters)
-            with metrics.aggregate(new_root=True) as agg:
-                for sample in progress:
-                    trainer.valid_step(sample, ngram=ngram)
+        # create a new root metrics aggregator so validation metrics
+        # don't pollute other aggregators (e.g., train meters)
+        with metrics.aggregate(new_root=True) as agg:
+            i = 0
+            for sample in progress:
+                i += 1
+                if args.validation_max_size > 0 and i > args.validation_max_size / args.distributed_world_size:
+                    continue
+                trainer.valid_step(sample, validation_topk=args.validation_topk, validation_D=args.validation_D, validation_rounds=args.validation_rounds)
 
-            # log validation stats
-            stats = get_valid_stats(args, trainer, agg.get_smoothed_values())
-            progress.print(stats, tag=subset+'-'+str(ngram), step=trainer.get_num_updates())
+        # log validation stats
+        stats = get_valid_stats(args, trainer, agg.get_smoothed_values())
+        progress.print(stats, tag=subset, step=trainer.get_num_updates())
 
-            valid_losses.append(stats[args.best_checkpoint_metric])
+        valid_losses.append(stats[args.best_checkpoint_metric])
     return valid_losses
 
 

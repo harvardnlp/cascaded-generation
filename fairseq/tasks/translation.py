@@ -278,10 +278,10 @@ class TranslationTask(FairseqTask):
             self.sequence_generator = self.build_generator([model], Namespace(**gen_args))
         return model
 
-    def valid_step(self, sample, model, criterion, ngram=None):
-        loss, sample_size, logging_output = super().valid_step(sample, model, criterion, ngram=ngram)
+    def valid_step(self, sample, model, criterion, validation_topk=None, validation_D=None, validation_rounds=None):
+        loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
         if self.args.eval_bleu:
-            bleu = self._inference_with_bleu(self.sequence_generator, sample, model, ngram=ngram)
+            bleu = self._inference_with_bleu(self.sequence_generator, sample, model, topk=validation_topk, D=validation_D, rounds=validation_rounds)
             logging_output['_bleu_sys_len'] = bleu.sys_len
             logging_output['_bleu_ref_len'] = bleu.ref_len
             # we split counts into separate entries so that they can be
@@ -344,7 +344,7 @@ class TranslationTask(FairseqTask):
         """Return the target :class:`~fairseq.data.Dictionary`."""
         return self.tgt_dict
 
-    def _inference_with_bleu(self, generator, sample, model, ngram=None):
+    def _inference_with_bleu(self, generator, sample, model, topk=None, D=None, rounds=None):
         import sacrebleu
 
         def decode(toks, escape_unk=False):
@@ -357,7 +357,7 @@ class TranslationTask(FairseqTask):
                 s = self.tokenizer.decode(s)
             return s
 
-        gen_out = self.inference_step(generator, [model], sample, None, ngram=ngram)
+        gen_out = self.inference_step(generator, [model], sample, None, topk=topk, D=D, rounds=rounds)
         hyps, refs = [], []
         for i in range(len(gen_out)):
             hyps.append(decode(gen_out[i][0]['tokens']))

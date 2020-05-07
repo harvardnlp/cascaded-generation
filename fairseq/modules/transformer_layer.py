@@ -74,7 +74,7 @@ class TransformerEncoderLayer(nn.Module):
                     state_dict["{}.{}.{}".format(name, new, m)] = state_dict[k]
                     del state_dict[k]
 
-    def forward(self, x, encoder_padding_mask, ngram: Optional[int] = None, attn_mask: Optional[Tensor] = None):
+    def forward(self, x, encoder_padding_mask, attn_mask: Optional[Tensor] = None):
         """
         Args:
             x (Tensor): input to the layer of shape `(seq_len, batch, embed_dim)`
@@ -110,7 +110,6 @@ class TransformerEncoderLayer(nn.Module):
             value=x,
             key_padding_mask=encoder_padding_mask,
             attn_mask=attn_mask,
-            ngram=ngram,
         )
         if x.ne(x).any():
             import pdb; pdb.set_trace()
@@ -234,7 +233,6 @@ class TransformerDecoderLayer(nn.Module):
         self_attn_padding_mask: Optional[torch.Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
-        ngram: Optional[int] = None,
         is_translate: Optional[bool] = False,
         is_cascade: Optional[bool] = False,
         offset: Optional[torch.Tensor] = None,
@@ -302,7 +300,6 @@ class TransformerDecoderLayer(nn.Module):
             incremental_state=incremental_state,
             need_weights=False,
             attn_mask=self_attn_mask,
-            ngram=ngram,
             is_translate=is_translate,
             is_cascade=is_cascade,
             offset=offset,
