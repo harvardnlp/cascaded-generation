@@ -515,6 +515,12 @@ def add_generation_args(parser):
     group = parser.add_argument_group("Generation")
     add_common_eval_args(group)
     # fmt: off
+    group.add_argument('--distributed-backend', default='NCCL', type=str,
+                       help='distributed backend')
+    group.add_argument('--distributed-master-addr', default='127.0.0.1', type=str,
+                       help='distributed master addr')
+    group.add_argument('--distributed-master-port', default='29500', type=str,
+                       help='distributed master port')
     group.add_argument('--ngpus', default=1, type=int, metavar='N',
                        help='beam size')
     group.add_argument('--beam', default=5, type=int, metavar='N',

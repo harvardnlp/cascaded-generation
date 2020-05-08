@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
-import genbmm
+
 import torch
 import torch.nn as nn
 from torch.cuda._utils import _get_device_index
@@ -12,6 +12,7 @@ import torch_struct
 from fairseq import search, utils
 from fairseq.data import data_utils
 from fairseq.models import FairseqIncrementalDecoder
+
 import importlib.util
 spec = importlib.util.spec_from_file_location("get_fb", "genbmm/opt/hmm.py")
 foo = importlib.util.module_from_spec(spec)
@@ -101,10 +102,10 @@ class SequenceGenerator(object):
             match_source_len (bool, optional): outputs should match the source
                 length (default: False)
         """
-        #import pdb; pdb.set_trace()
+        if usenew:
+            import genbmm
         self.usenew = usenew
         self.ngpus = ngpus
-        self.to_dump = []
         self.timesx = timesx
         self.pad = tgt_dict.pad()
         self.unk = tgt_dict.unk()
@@ -138,7 +139,7 @@ class SequenceGenerator(object):
 
 
     @torch.no_grad()
-    def generate(self, models, sample, topk=None, D=None, rounds=None, **kwargs):
+    def generate(self, models, sample, topk=None, D=None, rounds=None, rank=0, ngpus=1, **kwargs):
         """Generate a batch of translations.
 
         Args:
@@ -156,7 +157,7 @@ class SequenceGenerator(object):
         #    return self._generate(model, sample, ngram=ngram, **kwargs)
         #else:
         #    return self._generate2(model, sample, ngram=ngram, **kwargs)
-        return self._generate_cascade(model, sample, topk=topk, D=D, rounds=rounds, **kwargs)
+        return self._generate_cascade(model, sample, topk=topk, D=D, rounds=rounds, rank=rank, ngpus=ngpus, **kwargs)
 
     @torch.no_grad()
     def _generate_cascade(
@@ -168,11 +169,15 @@ class SequenceGenerator(object):
         topk=None,
         D=None,
         rounds=None,
+        rank=0,
+        ngpus=1,
         **kwargs
     ):
+        if ngpus > 1:
+            import torch.distributed as dist
+            dist.barrier() # for fairness of comparison
         model.eval()
-        # model.forward normally channels prev_output_tokens into the decoder
-        # separately, but SequenceGenerator directly calls model.encoder
+        assert ngpus == self.ngpus, (ngpus, self.ngpus)
         encoder_input = {
             k: v for k, v in sample['net_input'].items()
             if k != 'prev_output_tokens'
@@ -183,8 +188,8 @@ class SequenceGenerator(object):
         input_size = src_tokens.size()
         # batch dimension goes first followed by source lengths
         bsz = input_size[0]
-        #print ('***', sample)
-        assert bsz == 1, sample
+        if self.ngpus > 1:
+            assert bsz == 1, 'Multi-GPU inference only supports batch size 1!'
         src_len = input_size[1]
 
         padding_idx = 1
@@ -194,16 +199,17 @@ class SequenceGenerator(object):
         target_lengths = (self.max_len_a * src_lengths + self.max_len_b + 1).round().long() # + 1: target includes EOS
 
         length = target_lengths.max().item()
-        #print ('max length', length)
 
         if D > 0:
             max_target_lengths = target_lengths + D
-            min_target_lengths = target_lengths - D 
+            min_target_lengths = target_lengths - D
             min_target_lengths = min_target_lengths.clamp(min=self.min_len+1) # always produce sth
             max_target_lengths = torch.max(min_target_lengths, max_target_lengths)
             length = max_target_lengths.max().item() + 1
+        ngpus_use = min(length, ngpus)
         encoder_time_start = time.time()
-        encoder_outs = model.forward_encoder(encoder_input)
+        if rank < ngpus_use:
+            encoder_outs = model.forward_encoder(encoder_input)
         encoder_time = time.time() - encoder_time_start
         time_spent['encoder_time'] += encoder_time
         prev_beam_sizes = []
@@ -212,9 +218,8 @@ class SequenceGenerator(object):
         beam_sizes = [topk for _ in range(rounds)][:length]
 
         device = src_tokens.device
-        new_order = torch.arange(bsz).view(-1, 1).repeat(1, length).view(-1)
         finalized = [[] for i in range(bsz)]
-        new_order = new_order.to(device).long()
+        chunk_size = length // ngpus_use # chunk_size should not change
         debug_flag = False
         if length > 20:
             debug_flag = True
@@ -230,268 +235,329 @@ class SequenceGenerator(object):
                                      [ 1921,  4554,   865,    29,   584,    10,  6599, 35595,  7839,  2506, 372,   677,    67,  1921,  4554,     9,  6893,    92,   808,     5, 2]]).to(device)
         #encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
         for order, beam_size in enumerate(beam_sizes):
-            #beam_size = self.beam_size
+            length_needed = length-order
+            prev_ngpus_use = ngpus_use
+            ngpus_use = min(ngpus_use, int(math.ceil(length_needed / chunk_size)))
+            assert ngpus_use >= 1, ngpus_use
+            chunk_size_last = length_needed - chunk_size * (ngpus_use-1)
+            max_chunk_size = max(chunk_size, chunk_size_last)
+            chunk_sizes = [chunk_size if r<ngpus_use-1 else chunk_size_last for r in range(ngpus_use)]
+            if rank < ngpus_use:
+                offset_start = rank * chunk_size
+                offset_end = offset_start + chunk_sizes[rank]
+                offset_length = chunk_sizes[rank]
             if order == 0:
                 beam_size = beam_size * self.timesx
-                prev_output_tokens = src_tokens.new(bsz*length, 1).fill_(0)
-                position = torch.arange(length).view(1, -1).repeat(bsz, 1) + 2
-                position = position.to(device).long().view(-1, 1)
-                forward_decoder_time_start = time.time()
+                if rank < ngpus_use:
+                    prev_output_tokens = src_tokens.new(bsz*offset_length, 1).fill_(0)
+                    position = torch.arange(offset_start, offset_end).view(1, -1).repeat(bsz, 1) + 2
+                    position = position.to(device).long().view(-1, 1)
+                    forward_decoder_time_start = time.time()
+                    lprobs, _ = model.forward_decoder(
+                        prev_output_tokens, encoder_outs, temperature=self.temperature, disable_incremental_states=False, is_cascade=True, position=position,
+                    ) # bsz, V
+                    forward_decoder_time = time.time() - forward_decoder_time_start
+                    time_spent['forward_decoder_time'] += forward_decoder_time
 
-
-                lprobs, _ = model.forward_decoder(
-                    prev_output_tokens, encoder_outs, temperature=self.temperature, disable_incremental_states=False, is_cascade=True, position=position,
-                ) # bsz, V
-                forward_decoder_time = time.time() - forward_decoder_time_start
-                time_spent['forward_decoder_time'] += forward_decoder_time
-
-                masking_time_start = time.time()
-                unigram_probs = lprobs.view(bsz, length, -1).contiguous() # bsz, length, V
-                V = unigram_probs.size(-1)
-                # make sure length constraints are satisfied
-                ids = torch.arange(length).view(1, -1).expand(bsz, -1).to(device)
-                if D > 0:
-                    #unigram_probs[:, -2, 2] = 0 # </s> possible
-                    #unigram_probs[:, :, 1] = -float('inf') # cannot emit pad
-                    unigram_probs[ids.gt(max_target_lengths.view(-1, 1)-1)] = -float('inf') # max length constraint, pad after
-                    #unigram_probs[:, :, 1][ids.gt(target_lengths.view(-1, 1)-1)] = 0 # must be pad after max len
-                    #unigram_probs[:, -1] = -float('inf')
-                    unigram_probs[:, :, 1][ids.gt(min_target_lengths.view(-1,1)-1)] = 0 # pad possible everywhere after position 1, TODO: use window instead
-                    unigram_probs[:, :, 2][ids.le(max_target_lengths.view(-1, 1)-1) & ids.ge(min_target_lengths.view(-1,1)-1)] = 0 # </s> possible before max_len
-                    #unigram_probs[:, 1:, 2] = 0 # eos possible everywhere after position 1, TODO: use window instead
-                    #unigram_probs[:, -1, 1] = 0 # last position must be pad
-
-                if D == 0:
-                    unigram_probs[ids.ge(target_lengths.view(-1, 1)-1)] = -float('inf')
-                    unigram_probs[:, :, 2][ids.ge(target_lengths.view(-1, 1)-1)] = 0
-                    unigram_probs[:, :, 2][ids.lt(target_lengths.view(-1, 1)-1)] = -float('inf')
+                    masking_time_start = time.time()
+                    unigram_probs = lprobs.view(bsz, offset_length, -1).contiguous() # bsz, length, V
+                    V = unigram_probs.size(-1)
+                    ids = torch.arange(offset_start, offset_end, device=device).view(1, -1).expand(bsz, -1)
+                    if D > 0:
+                        unigram_probs[ids.gt(max_target_lengths.view(-1, 1)-1)] = -float('inf') # max length constraint, pad after
+                        unigram_probs[:, :, 1][ids.gt(min_target_lengths.view(-1,1)-1)] = 0 # pad possible everywhere after position 1, TODO: use window instead
+                        unigram_probs[:, :, 2][ids.le(max_target_lengths.view(-1, 1)-1) & ids.ge(min_target_lengths.view(-1,1)-1)] = 0 # </s> possible before max_len
+                    elif D == 0:
+                        unigram_probs[ids.ge(target_lengths.view(-1, 1)-1)] = -float('inf')
+                        unigram_probs[:, :, 2][ids.ge(target_lengths.view(-1, 1)-1)] = 0
+                        unigram_probs[:, :, 2][ids.lt(target_lengths.view(-1, 1)-1)] = -float('inf')
 
                 if len(beam_sizes) == 1:
-                    tokens = unigram_probs.max(-1)[1] # bsz, L
-                    for i in range(bsz):
-                        hypo = {
-                            'tokens': tokens[i][tokens[i].ne(1)] if D>0 else tokens[i],
-                            'score': 0,
-                            'attention': None,  # src_len x tgt_len
-                            'alignment': None,
-                            'positional_scores': torch.zeros(1),
-                        }
-                        finalized[i].append(hypo)
-                    break
-                masking_time = time.time() - masking_time_start
-                time_spent['masking_time'] += masking_time
-
-                scores, mapping = torch.topk(unigram_probs, beam_size, -1) # bsz, L, K
-
-                #all_tokens.append(mapping.cpu().unsqueeze(-1))
-                all_tokens.append(mapping.unsqueeze(-1))
-
-                if debug_flag:
-                    for b in range(bsz):
-                        for l in range(all_tokens[-1].size(1)):
-                            flag = False
-                            for k in range(all_tokens[-1].size(-2)):
-                                tok = all_tokens[-1][b][l][k] # order
-                                tok_must = must[b][l:(l+tok.size(0))]
-                                if tok_must.eq(tok).all():
-                                    flag = True
-                            if not flag:
-                                print ('not here', b, l)
-
-                probs = scores[:, 0].contiguous() # bsz, K
-                next_words = mapping[:, 1:] # bsz, L-1, K
-                new_order = torch.arange(bsz*length).view(-1, 1).repeat(1, beam_size).view(-1)
-                new_order = new_order.to(device).long()
-                #encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
-                reorder_time_start = time.time()
-                model.reorder_incremental_state(new_order)
-                reorder_time = time.time() - reorder_time_start
-                time_spent['reorder_time'] += reorder_time
-                position = position.view(-1, 1).repeat(1, beam_size).view(-1, 1)
-                prev_beam_sizes.append(beam_size)
-            else:
-                prev_output_tokens = all_tokens[-1].view(-1, order).to(device) # bsz* L* K, order
-                bos_tokens = src_tokens.new(prev_output_tokens.size(0), 1).fill_(0)
-                prev_output_tokens = torch.cat([bos_tokens, prev_output_tokens], -1) # bsz* L* K, order+1
-                prev_position = position
-                position = prev_position[:,-1:].add(1) # -1, 1
-                position = torch.cat([prev_position, position], -1) # bsz* L* K, order
-                forward_decoder_time_start = time.time()
-                lprobs, _ = model.forward_decoder(
-                    prev_output_tokens, encoder_outs, temperature=self.temperature, disable_incremental_states=False, is_cascade=True, position=position,
-                ) # bsz, V
-                forward_decoder_time = time.time() - forward_decoder_time_start
-                time_spent['forward_decoder_time'] += forward_decoder_time
-
-                masking_time_start = time.time()
-                ngram_probs = lprobs.view(bsz, length-order+1, prev_beam_sizes[-1], -1).contiguous() # bsz, length, K, V
-                ngram_probs = ngram_probs[:, :-1] # bsz, length-1, K, V
-                #import pdb; pdb.set_trace()
-                ids = torch.arange(length-order).view(1, -1).expand(bsz, -1).to(device)
-                if D == 0:
-                    ngram_probs[ids.ge(target_lengths.view(-1, 1)-1-order)] = -float('inf')
-                    ngram_probs[:, :, :, 2][ids.ge(target_lengths.view(-1, 1)-1-order)] = 0
-                    ngram_probs[:, :, :, 2][ids.lt(target_lengths.view(-1, 1)-1-order)] = -float('inf')
-                if D > 0: # 1. pad transits to pad 2. </s> transits to pad 3. others cannot to pad
-                    #ngram_probs[:, :, :, 1] = -float('inf') # cannot emit pad
-                    ngram_probs[ids.gt(max_target_lengths.view(-1, 1)-1-order)] = -float('inf')
-                    #ngram_probs[:, :, :, 1][ids.gt(max_target_lengths.view(-1, 1)-1-order)] = 0 # must be pad after max len
-                    #ngram_probs[:, :, :, 1] = 0 # pad possible everywhere, TODO: use window instead
-                    last_words = prev_output_tokens[:, -1].view(bsz, length-order+1, -1)[:, :-1] # bsz, length-order, K
-                    #ngram_probs[:, :, 2][ids.le(target_lengths.view(-1, 1)-1)] = 0 # </s> possible before max_len
-                    ngram_probs[:, :, :, :][last_words.eq(1)] = -float('inf') # pad to nothing
-                    ngram_probs[:, :, :, 1][last_words.eq(1)] = 0 # pad to pad
-                    ngram_probs[:, :, :, :][last_words.eq(2)] = -float('inf') # </s> to nothing
-                    ngram_probs[:, :, :, 1][last_words.eq(2)] = 0 # </s> to pad
-                ngram_probs[:, 0] = ngram_probs[:, 0] + probs.unsqueeze(-1)
-
-                next_words = next_words.unsqueeze(-2).expand(-1, -1, prev_beam_sizes[-1], -1) # bsz, L-1, K, K
-                next_scores = ngram_probs.gather(-1, next_words) # bsz, L-1, K, K
-
-                # TODO: 1 we need to mask incompatible; 2 transpose
-                if order > 1:
-                    ##import pdb; pdb.set_trace()
-                    first_node = all_tokens[-1][:, :-1, :, 1:].unsqueeze(-2).expand(-1, -1, -1, prev_beam_sizes[-1], -1) # bsz, L-3, K, 1*K, order-2
-                    next_node = all_tokens[-1][:, 1:, :, :-1].unsqueeze(-3).expand(-1, -1, prev_beam_sizes[-1], -1, -1) # bsz, L-3, 1*K, K, order-2
-                    boolean = first_node.ne(next_node).any(-1)
-                    next_scores[boolean] = -float('inf')
-                # TODO: we need to mask incompatible
-                ngram_probs = next_scores # bsz, length-1, K, K
-                total_num_valid[order] += ngram_probs.ne(-float('inf')).float().sum().item()
-                total_num_total[order] += ngram_probs.view(-1).size(0)
-                masking_time = time.time() - masking_time_start 
-                #time_spent['masking_time'] += masking_time
-                #print (f'percent order {order} ', total_num_valid[order]/total_num_total[order], 'valid', total_num_valid[order], 'total', total_num_total[order])
-
-                #import pdb; pdb.set_trace()
-                if order != len(beam_sizes)-1:
-                    #dist = torch_struct.LinearChainCRF(ngram_probs)
-                    if self.usenew == 0:
-                       if ngram_probs.size(-1) not in fbs:
-                           fbs[ngram_probs.size(-1)] = foo.fb_max(ngram_probs.size(-1))
-                       fb = fbs[ngram_probs.size(-1)]
-                    #edge_marginals = dist.marginals # 1, length-2, K, K
-                    #edge_max_marginals = dist.max_marginals # 1, length-2, K, K
-                    if self.cscore == -9:
-                        dist = torch_struct.LinearChainCRF(ngram_probs.transpose(-1,-2))
-                        counts = dist.count
-                        print (f'count order {order} ', counts)
-                    with torch.no_grad():
-
-                        #edge_max_marginals = fb(ngram_probs.transpose(0, 1).contiguous()).cpu() # bsz, length-1, K, K
-                        marginal_time_start = time.time()
-                        if self.usenew == 0:
-                            edge_max_marginals = fb(ngram_probs.transpose(0, 1).contiguous()) # bsz, length-1, K, K
-                            edge_marginals = edge_max_marginals.transpose(0, 1).contiguous() # bsz, length-1, K, K
+                    if rank < ngpus_use:
+                        tokens = unigram_probs.max(-1)[1] # bsz, L
+                    if ngpus > 1:
+                        if rank < ngpus_use:
+                            tokens = tokens.view(-1)
+                            if tokens.size(0) < max_chunk_size:
+                                tokens_new = tokens.new(max_chunk_size)
+                                tokens_new[:tokens.size(0)] = tokens
                         else:
-                        #self.to_dump.append(ngram_probs.cpu().clone())
-                            edge_max_marginals = max_marginals(ngram_probs)
-                            edge_marginals = edge_max_marginals.contiguous().transpose(-1, -2).contiguous()
+                            tokens = src_tokens.new(max_chunk_size)
+                        g_list = []
+                        for r in range(0, ngpus):
+                            tokens_recv = tokens.new(max_chunk_size)
+                            g_list.append(tokens_recv)
+                        dist.all_gather(g_list, tokens)
+                        if rank == 0:
+                            g_list_out = []
+                            for r, tokens in enumerate(g_list):
+                                if r < ngpus_use:
+                                    offset_length_r = chunk_sizes[r]
+                                    if offset_length_r < max_chunk_size:
+                                        g_list_out.append(tokens[:offset_length_r])
+                                    else:
+                                        g_list_out.append(tokens)
+                            tokens_gathered = torch.cat(g_list_out, 0)
+                            tokens_gathered = tokens_gathered.view(bsz, -1)
+                            tokens = tokens_gathered
+                    if rank == 0:
+                        for i in range(bsz):
+                            hypo = {
+                                'tokens': tokens[i][tokens[i].ne(1)] if D>0 else tokens[i],
+                                'score': 0,
+                                'attention': None,  # src_len x tgt_len
+                                'alignment': None,
+                                'positional_scores': torch.zeros(1),
+                            }
+                            finalized[i].append(hypo)
+                    break
+                else:
+                    if rank < ngpus_use:
+                        scores, mapping = torch.topk(unigram_probs, beam_size, -1) # bsz, L, K
+                    if ngpus > 1:
+                        g_list = []
+                        for r in range(0, ngpus):
+                            tokens_recv = src_tokens.new(max_chunk_size*beam_size)
+                            g_list.append(tokens_recv)
+                        if rank < ngpus_use:
+                            mapping_flat = mapping.view(-1) # L*K
+                            if mapping_flat.size(0) < max_chunk_size * beam_size:
+                                tokens = src_tokens.new(max_chunk_size * beam_size)
+                                tokens[:mapping_flat.size(0)] = mapping_flat
+                                mapping_flat = tokens
+                        else:
+                            mapping_flat = src_tokens.new(max_chunk_size * beam_size)
+                        dist.all_gather(g_list, mapping_flat)
+                        if rank < ngpus_use:
+                            g_list_out = []
+                            for r, tokens in enumerate(g_list):
+                                if r < ngpus_use:
+                                    offset_length_r = chunk_sizes[r]
+                                    if offset_length_r < max_chunk_size:
+                                        g_list_out.append(tokens[:offset_length_r*beam_size].view(-1, beam_size))
+                                    else:
+                                        g_list_out.append(tokens.view(-1, beam_size))
+                                else:
+                                    break
+                            mapping_gathered = torch.cat(g_list_out, 0).unsqueeze(0) # 1, L, K
+                            mapping = mapping_gathered
+                    if rank < ngpus_use:
+                        all_tokens.append(mapping.unsqueeze(-1))
 
-                        marginal_time = time.time() - marginal_time_start
-                        time_spent['marginal_time'] += marginal_time
-                        scores, mapping = torch.topk(edge_marginals.view(bsz, length-order, -1), beam_size, -1) # bsz, length-1, beam_size
-                        # scores: 1, L-1, 500
-                        mapping2 = mapping.to(device) #bsz,  length-1, K2
-                        #import pdb; pdb.set_trace()
-                        probs = ngram_probs[:, 0].view(bsz, -1).gather(-1, mapping2[:, 0])# bsz, K2
-                        x_idx0 = mapping2 // prev_beam_sizes[-1] # bsz, length-1, K2
-                        x_idx = x_idx0.unsqueeze(-1) # bsz, L-1, K2, 1
-                        y_idx0 = mapping2.fmod(prev_beam_sizes[-1])
-                        y_idx = y_idx0.unsqueeze(-1) # bsz, L-1, K2, 1
-
-                        new_order = torch.arange(bsz) * (length-order+1) * prev_beam_sizes[-1]
-                        new_order = new_order.to(device).view(-1, 1, 1) # bsz, 1, 1
-                        tmp = torch.arange(length-order) * prev_beam_sizes[-1]
-                        tmp = tmp.to(device).view(1, -1, 1) # 1, length-1, 1
-                        new_order = new_order + tmp + x_idx0 # bsz, length-1, K2
-                        new_order = new_order.long().view(-1)
+                        if debug_flag:
+                            for b in range(bsz):
+                                for l in range(all_tokens[-1].size(1)):
+                                    flag = False
+                                    for k in range(all_tokens[-1].size(-2)):
+                                        tok = all_tokens[-1][b][l][k] # order
+                                        tok_must = must[b][l:(l+tok.size(0))]
+                                        if tok_must.eq(tok).all():
+                                            flag = True
+                                    if not flag:
+                                        print ('not here', b, l)
+                        if rank == 0:
+                            probs = scores[:, 0].contiguous() # bsz, K
+                        next_words = mapping[:, 1:] # bsz, L-1, K
+                        new_order = torch.arange(bsz*offset_length).view(-1, 1).repeat(1, beam_size).view(-1)
+                        new_order = new_order.to(device).long()
                         reorder_time_start = time.time()
-                        position = position.index_select(0, new_order) # bsz*length-1*K2, order
-                        #encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
                         model.reorder_incremental_state(new_order)
                         reorder_time = time.time() - reorder_time_start
                         time_spent['reorder_time'] += reorder_time
-
-
-                    prev_mapping = all_tokens[-1].to(device) # bsz, L, K1, order
-                    x_idx = x_idx.expand(-1, -1, -1, prev_mapping.size(-1))
-                    prev_mapping_x_idx = prev_mapping[:, :-1].gather(2, x_idx) # bsz, L-1, K2, order
-
-                    prev_mapping_last_y_idx = prev_mapping[:, 1:, :, -1:].gather(2, y_idx) # bsz, L-1, K, 1
-                    next_words = prev_mapping_last_y_idx[:, 1:, :, 0] # bsz, L-2, K
-                    mapping2 = torch.cat([prev_mapping_x_idx, prev_mapping_last_y_idx], -1) # bsz, L-1, K2, 2
-                    #all_tokens.append(mapping2.cpu())
-                    all_tokens.append(mapping2)
-                    if debug_flag:
-                        for b in range(bsz):
-                            for l in range(all_tokens[-1].size(1)):
-                                flag = False
-                                for k in range(all_tokens[-1].size(-2)):
-                                    tok = all_tokens[-1][b][l][k] # order
-                                    tok_must = must[b][l:(l+tok.size(0))]
-                                    if tok_must.eq(tok).all():
-                                        flag = True
-                                if not flag:
-                                    print ('not here', b, l)
+                        position = position.view(-1, 1).repeat(1, beam_size).view(-1, 1)
                     prev_beam_sizes.append(beam_size)
-                        #y_idx = next_words[:,0,:].gather(-1, y_idx) # L-1, K
+            else:
+                if rank < ngpus_use:
+                    if (ngpus_use == prev_ngpus_use) and (rank == (ngpus_use-1)):
+                        state_offset_end = offset_end + 1
+                    else:
+                        state_offset_end = offset_end
+                    prev_output_tokens = all_tokens[-1][:, offset_start:state_offset_end].view(-1, order) # bsz* L* K, order
+                    bos_tokens = src_tokens.new(prev_output_tokens.size(0), 1).fill_(0)
+                    prev_output_tokens = torch.cat([bos_tokens, prev_output_tokens], -1) # bsz* L* K, order+1
+                    prev_position = position
+                    position = prev_position[:,-1:].add(1) # -1, 1
+                    position = torch.cat([prev_position, position], -1) # bsz* L* K, order
+                    forward_decoder_time_start = time.time()
+                    lprobs, _ = model.forward_decoder(
+                        prev_output_tokens, encoder_outs, temperature=self.temperature, disable_incremental_states=False, is_cascade=True, position=position,
+                    ) # bsz, V
+                    forward_decoder_time = time.time() - forward_decoder_time_start
+                    time_spent['forward_decoder_time'] += forward_decoder_time
 
-                    #TODO: states_new = [[states[l][x_idx0[l][k1].item()][prev_mapping_last_y_idx[l][k1][0].item()] for k1 in range(beam_size)] for l in range(length-order-1)] # L-2, K
-                    #TODO: states = states_new
-# TODO:     next_words, from y, replace print_constraints
-                    #total_time += end - start
+                    masking_time_start = time.time()
+                    ngram_probs = lprobs.view(bsz, -1, prev_beam_sizes[-1], V).contiguous() # bsz, length, K, V
+                    if (ngpus_use == prev_ngpus_use) and (rank == (ngpus_use-1)):
+                        ngram_probs = ngram_probs[:, :-1]
+                    assert ngram_probs.size(1) == offset_length, (ngram_probs.size(1), offset_length)
+                    ids = torch.arange(offset_start, offset_end).view(1, -1).expand(bsz, -1).to(device)
+                    if D == 0:
+                        ngram_probs[ids.ge(target_lengths.view(-1, 1)-1-order)] = -float('inf')
+                        ngram_probs[:, :, :, 2][ids.ge(target_lengths.view(-1, 1)-1-order)] = 0
+                        ngram_probs[:, :, :, 2][ids.lt(target_lengths.view(-1, 1)-1-order)] = -float('inf')
+                    elif D > 0: # 1. pad transits to pad 2. </s> transits to pad 3. others cannot to pad
+                        ngram_probs[ids.gt(max_target_lengths.view(-1, 1)-1-order)] = -float('inf')
+                        if (ngpus_use == prev_ngpus_use) and (rank == (ngpus_use-1)):
+                            last_words = prev_output_tokens[:, -1].contiguous().view(bsz, offset_length+1, -1)[:, :-1] # bsz, length-order, K
+                        else:
+                            last_words = prev_output_tokens[:, -1].contiguous().view(bsz, offset_length, -1) # bsz, length-order, K
+                        ngram_probs[:, :, :, :][last_words.eq(1)] = -float('inf') # pad to nothing
+                        ngram_probs[:, :, :, 1][last_words.eq(1)] = 0 # pad to pad
+                        ngram_probs[:, :, :, :][last_words.eq(2)] = -float('inf') # </s> to nothing
+                        ngram_probs[:, :, :, 1][last_words.eq(2)] = 0 # </s> to pad
+                    if rank == 0:
+                        ngram_probs[:, 0] = ngram_probs[:, 0] + probs.unsqueeze(-1)
+
+                    next_words = next_words[:, offset_start:offset_end]
+                    next_words = next_words.unsqueeze(-2).expand(-1, -1, prev_beam_sizes[-1], -1) # bsz, L-1, K, K
+                    next_scores = ngram_probs.gather(-1, next_words) # bsz, L-1, K, K
+
+                    # TODO: 1 we need to mask incompatible; 2 transpose
+                    if order > 1:
+                        ##import pdb; pdb.set_trace()
+                        first_node = all_tokens[-1][:, offset_start:offset_end, :, 1:].unsqueeze(-2).expand(-1, -1, -1, prev_beam_sizes[-1], -1) # bsz, L-3, K, 1*K, order-2
+                        next_node = all_tokens[-1][:, (offset_start+1):(offset_end+1), :, :-1].unsqueeze(-3).expand(-1, -1, prev_beam_sizes[-1], -1, -1) # bsz, L-3, 1*K, K, order-2
+                        boolean = first_node.ne(next_node).any(-1)
+                        next_scores[boolean] = -float('inf')
+                    # TODO: we need to mask incompatible
+                    ngram_probs = next_scores # bsz, length-1, K, K
+                    total_num_valid[order] += ngram_probs.ne(-float('inf')).float().sum().item()
+                    total_num_total[order] += ngram_probs.view(-1).size(0)
+                    masking_time = time.time() - masking_time_start 
+                    time_spent['masking_time'] += masking_time
+                    #print (f'percent order {order} ', total_num_valid[order]/total_num_total[order], 'valid', total_num_valid[order], 'total', total_num_total[order])
+                if ngpus > 1:
+                    if rank < ngpus_use:
+                        tokens = ngram_probs # bsz, offset_length, K, K
+                        tokens = tokens.view(-1)
+                        if tokens.size(0) < max_chunk_size * prev_beam_sizes[-1] * prev_beam_sizes[-1]:
+                            tokens_new = tokens.new(max_chunk_size * prev_beam_sizes[-1] * prev_beam_sizes[-1])
+                            tokens_new[:tokens.size(0)] = tokens
+                            tokens = tokens_new
+                    else:
+                        tokens = src_tokens.new(max_chunk_size * prev_beam_sizes[-1] * prev_beam_sizes[-1]).float()
+                    g_list=[]
+                    for r in range(0, ngpus):
+                        tokens_recv = tokens.new(max_chunk_size *  prev_beam_sizes[-1] * prev_beam_sizes[-1])
+                        g_list.append(tokens_recv)
+                    dist.all_gather(g_list, tokens)
+                    if rank < ngpus_use:
+                        g_list_out = []
+                        for r, tokens in enumerate(g_list):
+                            if r < ngpus_use:
+                                offset_length_r = chunk_sizes[r]
+                                if offset_length_r < max_chunk_size:
+                                    g_list_out.append(tokens[:offset_length_r * prev_beam_sizes[-1] * prev_beam_sizes[-1]].view(bsz, -1, prev_beam_sizes[-1], prev_beam_sizes[-1]))
+                                else:
+                                    g_list_out.append(tokens.view(bsz, -1, prev_beam_sizes[-1], prev_beam_sizes[-1]))
+                        ngram_probs_gathered = torch.cat(g_list_out, 1) # bsz, L, K, K
+                        ngram_probs = ngram_probs_gathered
+
+                #import pdb; pdb.set_trace()
+                if order != len(beam_sizes)-1:
+                    if rank < ngpus_use:
+                        if self.usenew == 0:
+                           if ngram_probs.size(-1) not in fbs:
+                               fbs[ngram_probs.size(-1)] = foo.fb_max(ngram_probs.size(-1))
+                           fb = fbs[ngram_probs.size(-1)]
+                        if self.cscore == -9:
+                            dist = torch_struct.LinearChainCRF(ngram_probs.transpose(-1,-2))
+                            counts = dist.count
+                            print (f'count order {order} ', counts)
+                        with torch.no_grad():
+                            marginal_time_start = time.time()
+                            if self.usenew == 0:
+                                edge_max_marginals = fb(ngram_probs.transpose(0, 1).contiguous()) # bsz, length-1, K, K
+                                edge_marginals = edge_max_marginals.transpose(0, 1).contiguous() # bsz, length-1, K, K
+                            else:
+                                edge_max_marginals = max_marginals(ngram_probs)
+                                edge_marginals = edge_max_marginals.contiguous().transpose(-1, -2).contiguous()
+
+                            marginal_time = time.time() - marginal_time_start
+                            time_spent['marginal_time'] += marginal_time
+                            scores, mapping = torch.topk(edge_marginals.view(bsz, length-order, -1), beam_size, -1) # bsz, length-1, beam_size
+                            # scores: 1, L-1, 500
+                            mapping2 = mapping.to(device) #bsz,  length-1, K2
+                            #import pdb; pdb.set_trace()
+                            if rank == 0:
+                                probs = ngram_probs[:, 0].view(bsz, -1).gather(-1, mapping2[:, 0])# bsz, K2
+                            x_idx0 = mapping2 // prev_beam_sizes[-1] # bsz, length-1, K2
+                            x_idx = x_idx0.unsqueeze(-1) # bsz, L-1, K2, 1
+                            y_idx0 = mapping2.fmod(prev_beam_sizes[-1])
+                            y_idx = y_idx0.unsqueeze(-1) # bsz, L-1, K2, 1
+
+                            if (ngpus_use == prev_ngpus_use) and (rank == (ngpus_use-1)):
+                                new_order = torch.arange(bsz) * (offset_length+1) * prev_beam_sizes[-1]
+                            else:
+                                new_order = torch.arange(bsz) * (offset_length) * prev_beam_sizes[-1]
+                            new_order = new_order.to(device).view(-1, 1, 1) # bsz, 1, 1
+                            tmp = torch.arange(offset_length) * prev_beam_sizes[-1]
+                            tmp = tmp.to(device).view(1, -1, 1) # 1, length-1, 1
+                            new_order = new_order + tmp + x_idx0[:, offset_start:offset_end] # bsz, length-1, K2
+                            new_order = new_order.long().view(-1)
+                            reorder_time_start = time.time()
+                            position = position.index_select(0, new_order) # bsz*length-1*K2, order
+                            model.reorder_incremental_state(new_order)
+                            reorder_time = time.time() - reorder_time_start
+                            time_spent['reorder_time'] += reorder_time
+
+
+                        prev_mapping = all_tokens[-1].to(device) # bsz, L, K1, order
+                        x_idx = x_idx.expand(-1, -1, -1, prev_mapping.size(-1))
+                        prev_mapping_x_idx = prev_mapping[:, :-1].gather(2, x_idx) # bsz, L-1, K2, order
+
+                        prev_mapping_last_y_idx = prev_mapping[:, 1:, :, -1:].gather(2, y_idx) # bsz, L-1, K, 1
+                        next_words = prev_mapping_last_y_idx[:, 1:, :, 0] # bsz, L-2, K
+                        mapping2 = torch.cat([prev_mapping_x_idx, prev_mapping_last_y_idx], -1) # bsz, L-1, K2, 2
+                        all_tokens.append(mapping2)
+                        if debug_flag:
+                            for b in range(bsz):
+                                for l in range(all_tokens[-1].size(1)):
+                                    flag = False
+                                    for k in range(all_tokens[-1].size(-2)):
+                                        tok = all_tokens[-1][b][l][k] # order
+                                        tok_must = must[b][l:(l+tok.size(0))]
+                                        if tok_must.eq(tok).all():
+                                            flag = True
+                                    if not flag:
+                                        print ('not here', b, l)
+                        prev_beam_sizes.append(beam_size)
                 else:
-                    ngram_probs = ngram_probs.transpose(-1, -2) # bsz, l, K, K
-                    #import pdb; pdb.set_trace()
-                    tokens_ = all_tokens[-1]
+                    if rank == 0:
+                        ngram_probs = ngram_probs.transpose(-1, -2) # bsz, l, K, K
+                        tokens_ = all_tokens[-1]
 
-                    #torch.cuda.empty_cache()
-                    #ngram_probs = ngram_probs.cpu()
-                    ngram_probs = ngram_probs
-                    dist = torch_struct.LinearChainCRF(ngram_probs)
-                    argmax = dist.argmax.transpose(-1,-2) # bsz, l, K, K
-                    if self.cscore == -4:
-                        max_score = dist.max
-                    if self.cscore == -9:
-                        counts = dist.count
-                        print (f'count order {order} ', counts)
-                    K = argmax.size(-1)
-                    argmax = argmax.contiguous().view(bsz, argmax.size(1), -1)
-                    max_ids = argmax.max(-1)[1] # bsz, l
-                    max_ids_x = max_ids // K # bsz, l
-                    max_ids_y = max_ids.fmod(K) # bsz, l
-                    tokens = torch.cat([max_ids_x, max_ids_y[:, -1:]], 1) # bsz, l+1
-                    first_token = tokens[:, 0] # bsz
-# tokens_[:, 0] bsz, K, order
-                    first_tokens = tokens_[:, 0].gather(1, first_token.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, tokens_.size(-1))).squeeze(1) # bsz, order
-# tokens_: bsz, l, K, order
-                    later_token = tokens[:, 1:] # bsz, l
-# tokens_[:, :, :, -1]: bsz, l, K
-                    later_tokens = tokens_[:, 1:, :, -1].gather(2, later_token.unsqueeze(-1)).squeeze(-1) # bsz, l
-                    tokens = torch.cat([first_tokens, later_tokens], 1) # bsz, l+order
-                    if debug_flag:
-                        import pdb; pdb.set_trace()
-                    for i in range(bsz):
-                        hypo = {
-                            'tokens': tokens[i][tokens[i].ne(1)] if D>0 else tokens[i],
-                            'score': max_score[i] if self.cscore==-4 else 0.,
-                            'attention': None,  # src_len x tgt_len
-                            'alignment': None,
-                            'positional_scores': torch.Tensor([max_score[i].item() if self.cscore==-4 else 0.]),
-                        }
-                        finalized[i].append(hypo)
+                        dis = torch_struct.LinearChainCRF(ngram_probs)
+                        argmax = dis.argmax.transpose(-1,-2) # bsz, l, K, K
+                        if self.cscore == -4:
+                            max_score = dist.max
+                        if self.cscore == -9:
+                            counts = dist.count
+                            print (f'count order {order} ', counts)
+                        K = argmax.size(-1)
+                        argmax = argmax.contiguous().view(bsz, argmax.size(1), -1)
+                        max_ids = argmax.max(-1)[1] # bsz, l
+                        max_ids_x = max_ids // K # bsz, l
+                        max_ids_y = max_ids.fmod(K) # bsz, l
+                        tokens = torch.cat([max_ids_x, max_ids_y[:, -1:]], 1) # bsz, l+1
+                        first_token = tokens[:, 0] # bsz
+                        first_tokens = tokens_[:, 0].gather(1, first_token.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, tokens_.size(-1))).squeeze(1) # bsz, order
+                        later_token = tokens[:, 1:] # bsz, l
+                        later_tokens = tokens_[:, 1:, :, -1].gather(2, later_token.unsqueeze(-1)).squeeze(-1) # bsz, l
+                        tokens = torch.cat([first_tokens, later_tokens], 1) # bsz, l+order
+                        for i in range(bsz):
+                            hypo = {
+                                'tokens': tokens[i][tokens[i].ne(1)] if D>0 else tokens[i],
+                                'score': max_score[i] if self.cscore==-4 else 0.,
+                                'attention': None,  # src_len x tgt_len
+                                'alignment': None,
+                                'positional_scores': torch.Tensor([max_score[i].item() if self.cscore==-4 else 0.]),
+                            }
+                            finalized[i].append(hypo)
 
-                    #for i in range(beam_size):
-                    #    samples = dist.sample((1, ))
-                    #    all_words, perplexity = get_sent(samples[0])
-                    #    #samples = dist.topk(beam_size)
-                    #    print (f'sample {i} PPL {perplexity}:', ' '.join(all_words).replace(' ', '').replace('<space>', ' '))
                     break
-            #new_order = torch.arange(bsz).view(-1, 1).repeat(1, beam_size).view(-1)
-            #new_order = new_order.to(src_tokens.device).long()
-            #encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
-        print (time_spent)
+        if rank == 0:
+            print (time_spent)
         return finalized
 
     @torch.no_grad()
