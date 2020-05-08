@@ -88,12 +88,10 @@ def _main(args, output_file):
     # (None if no unknown word replacement, empty if no path to align dictionary)
     align_dict = utils.load_align_dict(args.replace_unk)
 
-    shuffle_flag = False
-    if args.maxval>0:
-        shuffle_flag=True
-        seed = 1234
-    else:
-        seed = 1
+    shuffle = False
+    if args.max_size > 0:
+        shuffle = True
+        assert args.seed == 1234
     # Load dataset (possibly sharded)
     itr = task.get_batch_iterator(
         dataset=task.dataset(args.gen_subset),
@@ -108,8 +106,8 @@ def _main(args, output_file):
         num_shards=args.num_shards,
         shard_id=args.shard_id,
         num_workers=args.num_workers,
-        seed=seed,
-    ).next_epoch_itr(shuffle=shuffle_flag)
+        seed=args.seed,
+    ).next_epoch_itr(shuffle=shuffle)
     progress = progress_bar.progress_bar(
         itr,
         log_format=args.log_format,
@@ -140,10 +138,10 @@ def _main(args, output_file):
     num_sentences = 0
     has_target = True
     wps_meter = TimeMeter()
-    iii = 0
+    num_processed = 0
     for sample in progress:
-        iii += 1
-        if args.maxval>0 and iii > args.maxval:
+        num_processed += 1
+        if args.max_size > 0 and num_processed > args.max_size:
             break
         #import pdb; pdb.set_trace()
         sample = utils.move_to_cuda(sample) if use_cuda else sample
@@ -155,7 +153,7 @@ def _main(args, output_file):
             prefix_tokens = sample['target'][:, :args.prefix_size]
 
         gen_timer.start()
-        hypos = task.inference_step(generator, models, sample, prefix_tokens)
+        hypos = task.inference_step(generator, models, sample, prefix_tokens, topk=args.topk, D=args.D, rounds=args.rounds)
         num_generated_tokens = sum(len(h[0]['tokens']) for h in hypos)
         gen_timer.stop(num_generated_tokens)
 

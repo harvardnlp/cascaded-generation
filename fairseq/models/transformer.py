@@ -606,7 +606,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         self.args = args
         super().__init__(dictionary)
         self.register_buffer("version", torch.Tensor([3]))
-        self.ngrams = args.ngrams
+        self.ngrams = getattr(args, 'ngrams', 5)
         self._future_mask = torch.empty(0)
 
         self.dropout = args.dropout

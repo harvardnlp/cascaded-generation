@@ -307,12 +307,10 @@ class FairseqTask(object):
             match_source_len=getattr(args, "match_source_len", False),
             no_repeat_ngram_size=getattr(args, "no_repeat_ngram_size", 0),
             search_strategy=search_strategy,
-            rounds=getattr(args, "rounds", None),
             ngpus=getattr(args, "ngpus", 1),
             timesx=getattr(args, "timesx", 1),
             cscore=getattr(args, "cscore", None),
             usenew=getattr(args, "usenew", 0),
-            D=getattr(args, "D", None),
         )
 
     def train_step(

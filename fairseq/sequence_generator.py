@@ -72,11 +72,9 @@ class SequenceGenerator(object):
         match_source_len=False,
         no_repeat_ngram_size=0,
         search_strategy=None,
-        rounds=None,
         timesx=1,
         cscore=None,
         usenew=0,
-        D=None,
         ngpus=None,
         eos=None
     ):
@@ -107,7 +105,6 @@ class SequenceGenerator(object):
         self.usenew = usenew
         self.ngpus = ngpus
         self.to_dump = []
-        self.D = D
         self.timesx = timesx
         self.pad = tgt_dict.pad()
         self.unk = tgt_dict.unk()
@@ -128,8 +125,6 @@ class SequenceGenerator(object):
         self.match_source_len = match_source_len
         self.no_repeat_ngram_size = no_repeat_ngram_size
         self.cscore = cscore
-
-        self.replicas = None
 
         #self.beam_sizes = '9:11:13:17:0'.split(':')
         #self.beam_sizes = self.beam_sizes[:rounds]
