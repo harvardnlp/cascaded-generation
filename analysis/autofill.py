@@ -7,6 +7,7 @@ valid = False
 base_dir = '/n/rush_lab/users/y/cascade_logs/'
 dirs = ['wmt-en-de', 'wmt-de-en', 'iwslt']
 dirs = ['wmt-en-de-240k', 'wmt-de-en-240k', 'iwslt']
+dirs = ['wmt-en-de-240k', 'wmt-de-en-240k', 'iwslt']
 if distilled:
     dirs = [item + '-distill' for item in dirs]
     dirs = ['wmt-en-de-distill-240k', 'wmt-de-en-distill-240k', 'iwslt-distill']

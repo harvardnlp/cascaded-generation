@@ -530,9 +530,9 @@ class SequenceGenerator(object):
                         dis = torch_struct.LinearChainCRF(ngram_probs)
                         argmax = dis.argmax.transpose(-1,-2) # bsz, l, K, K
                         if self.cscore == -4:
-                            max_score = dist.max
+                            max_score = dis.max
                         if self.cscore == -9:
-                            counts = dist.count
+                            counts = dis.count
                             print (f'count order {order} ', counts)
                         K = argmax.size(-1)
                         argmax = argmax.contiguous().view(bsz, argmax.size(1), -1)
