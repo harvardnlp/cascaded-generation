@@ -94,3 +94,90 @@ CUDA_VISIBLE_DEVICES=0,1,2 fairseq-generate $DATA_BIN --path $SAVE_DIR/checkpoin
     --batch-size 1 --topk $TOPK --remove-bpe --D 3 --rounds $rounds --ngpus $NGPUS \
     --max-len-a $MAX_LEN_A --max-len-b $MAX_LEN_B
 ```
+
+
+## Training on Other Datasets
+
+### WMT14 (raw/distilled) En-De/De-En
+
+For preprocessing, we need to use joined dictionary.
+
+```
+DATASET=? # dataset dependent
+SOURCE_LANG=? # dataset dependent
+TARGET_LANG=? # dataset dependent
+TEXT=data/$DATASET
+DATA_BIN=data-bin/$DATASET
+fairseq-preprocess \
+    --source-lang $SOURCE_LANG --target-lang $TARGET_LANG \
+    --trainpref $TEXT/train --validpref $TEXT/valid --testpref $TEXT/test \
+    --destdir $DATA_BIN --thresholdtgt 0 --thresholdsrc 0 \
+    --workers 20 --joined-dictionary
+```
+
+We train on 3 GPUs.
+
+```
+DATASET=? # dataset dependent
+MAX_LEN_A=? # dataset dependent
+MAX_LEN_B=? # dataset dependent
+DATA_BIN=data-bin/$DATASET
+SAVE_DIR=checkpoints/$DATASET
+ARCH=transformer_wmt_en_de
+DROPOUT=0.1
+MAX_TOKENS=4096
+LR=7e-4
+WARMUP_UPDATES=4000
+MAX_UPDATES=240000
+WEIGHT_DECAY=0.0
+CUDA_VISIBLE_DEVICES=0,1,2 python train.py $DATA_BIN --arch $ARCH --share-all-embeddings \
+    --optimizer adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 --lr-scheduler inverse_sqrt --warmup-init-lr 1e-07 \
+    --warmup-updates 4000 --lr $LR --min-lr 1e-09 --criterion label_smoothed_cross_entropy --label-smoothing 0.1 \
+    --weight-decay $WEIGHT_DECAY --max-tokens $MAX_TOKENS --save-dir $SAVE_DIR --update-freq 3 \
+    --no-progress-bar --log-format json --log-interval 50 --save-interval-updates 1000 --dropout $DROPOUT\
+    --fp16 --ddp-backend=no_c10d --eval-bleu --eval-bleu-args '{"max_len_a": '$MAX_LEN_A', "max_len_b": '$MAX_LEN_B'}'\
+    --eval-bleu-detok moses --eval-bleu-remove-bpe --eval-bleu-print-samples  --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
+    --max-update $MAX_UPDATES  --validation-max-size 3000 --validation-topk 16 --validation-D 3 --validation-rounds 5 --seed 1234
+```
+
+### WMT16 (raw/distilled) En-Ro/Ro-En
+
+For preprocessing, we need to use joined dictionary.
+
+```
+DATASET=? # dataset dependent
+SOURCE_LANG=? # dataset dependent
+TARGET_LANG=? # dataset dependent
+TEXT=data/$DATASET
+DATA_BIN=data-bin/$DATASET
+fairseq-preprocess \
+    --source-lang $SOURCE_LANG --target-lang $TARGET_LANG \
+    --trainpref $TEXT/train --validpref $TEXT/valid --testpref $TEXT/test \
+    --destdir $DATA_BIN --thresholdtgt 0 --thresholdsrc 0 \
+    --workers 20 --joined-dictionary
+```
+
+We train on 3 GPUs.
+
+```
+DATASET=? # dataset dependent
+MAX_LEN_A=? # dataset dependent
+MAX_LEN_B=? # dataset dependent
+DATA_BIN=data-bin/$DATASET
+SAVE_DIR=checkpoints/$DATASET
+ARCH=transformer_wmt_en_de
+DROPOUT=0.3
+MAX_TOKENS=5461
+LR=7e-4
+WARMUP_UPDATES=10000
+MAX_UPDATES=120000
+WEIGHT_DECAY=0.01
+CUDA_VISIBLE_DEVICES=0,1,2 python train.py $DATA_BIN --arch $ARCH --share-all-embeddings \
+    --optimizer adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 --lr-scheduler inverse_sqrt --warmup-init-lr 1e-07 \
+    --warmup-updates $WARMUP_UPDATES --lr $LR --min-lr 1e-09 --criterion label_smoothed_cross_entropy --label-smoothing 0.1 \
+    --weight-decay $WEIGHT_DECAY --max-tokens $MAX_TOKENS --save-dir $SAVE_DIR --update-freq 1 \
+    --no-progress-bar --log-format json --log-interval 50 --save-interval-updates 1000 --dropout $DROPOUT\
+    --fp16 --ddp-backend=no_c10d --eval-bleu --eval-bleu-args '{"max_len_a": '$MAX_LEN_A', "max_len_b": '$MAX_LEN_B'}'\
+    --eval-bleu-detok moses --eval-bleu-remove-bpe --eval-bleu-print-samples --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
+    --max-update $MAX_UPDATES --validation-max-size 3000 --validation-topk 16 --validation-D 3 --validation-rounds 5 --seed 1234
+```
