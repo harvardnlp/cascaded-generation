@@ -13,9 +13,9 @@ pip install --editable .
 
 ## Datasets & Pretrained Models
 
-We only include `IWSLT14 De-En` in this repository. The entire folder can be found at [here](https://drive.google.com/drive/folders/1G5Vl150cPyc5EWxxqRdngwUifccQeccN?usp=sharing). Data and model for individual datasets can be found at links below.
+We only include `IWSLT14 De-En` in this repository. The entire folder can be found at [this link](https://drive.google.com/drive/folders/1G5Vl150cPyc5EWxxqRdngwUifccQeccN?usp=sharing). Data and model for individual datasets can be found at links below.
 
-* WMT14 En-De Distilled: [data]() [model]()
+* WMT14 En-De Distilled: [data](https://drive.google.com/file/d/1EF9RpYpyuAnDIxxsxiGfG7Y1adTQIUXc/view?usp=sharing) [model]()
 * WMT14 De-En Distilled: [data](https://drive.google.com/file/d/1jkLf_6VZnG358mf2y6e4RTDi54WkChDI/view?usp=sharing) [model]()
 * WMT16 En-Ro Distilled: [data]() [model]()
 * WMT16 Ro-En Distilled: [data]() [model]()
@@ -203,3 +203,8 @@ CUDA_VISIBLE_DEVICES=0,1,2 python train.py $DATA_BIN --arch $ARCH --share-all-em
     --eval-bleu-detok moses --eval-bleu-remove-bpe --eval-bleu-print-samples --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
     --max-update $MAX_UPDATES --validation-max-size 3000 --validation-topk 16 --validation-D 3 --validation-rounds 5 --seed 1234
 ```
+
+
+## Acknowledgements
+
+Our code is built on top of [fairseq](https://github.com/pytorch/fairseq) and [pytorch-strcut](https://github.com/harvardnlp/pytorch-struct).
