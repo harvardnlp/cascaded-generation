@@ -148,12 +148,12 @@ def log_eye_cat(x):
 
 
 def fb_max(size):
-    with autotvm.apply_history_best(f'best_hmm_k{size}.log'):
-        with tvm.target.create("cuda"):
-            s_mult, arg_bufs = hmm_runner_max('float32', size)
-            from tvm.contrib.dlpack import to_pytorch_func
-            mod = tvm.build(s_mult, arg_bufs, target="cuda", target_host="llvm")
-            hmm_pytorch_max = to_pytorch_func(mod)
+    #with autotvm.apply_history_best(f'best_hmm_k{size}.log'):
+    with tvm.target.create("cuda"):
+        s_mult, arg_bufs = hmm_runner_max('float32', size)
+        from tvm.contrib.dlpack import to_pytorch_func
+        mod = tvm.build(s_mult, arg_bufs, target="cuda", target_host="llvm")
+        hmm_pytorch_max = to_pytorch_func(mod)
     def fb(x):
         time, batch, size, _ = x.shape
         forward = torch.zeros(time+1, batch, size).cuda()
