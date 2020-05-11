@@ -2,20 +2,33 @@
 
 Here we provide code to reproduce our results. We provide all training data and training scripts, as well as all pretrained models used in our paper. Our code is built on top of [fairseq](https://github.com/pytorch/fairseq) and [pytorch-strcut](https://github.com/harvardnlp/pytorch-struct).
 
-# Prerequisites
+## Prerequisites
 
 ```
 pip install -qU git+https://github.com/harvardnlp/pytorch-struct
-# Optional CUDA kernels for FastLogSemiring
-!pip install -qU git+https://github.com/harvardnlp/genbmm
-# For plotting.
-!pip install -q matplotlib
+pip install -qU git+https://github.com/harvardnlp/genbmm
+pip install -q matplotlib
 pip install --editable .
 ```
 
-# Usage:
+## Datasets & Pretrained Models
 
-## Data Preprocessing
+We only include `IWSLT14 De-En` in this repository. The entire folder can be found at [here](https://drive.google.com/drive/folders/1G5Vl150cPyc5EWxxqRdngwUifccQeccN?usp=sharing). Data and model for individual datasets can be found at links below.
+
+* WMT14 En-De Distilled: [data]() [model]()
+* WMT14 De-En Distilled: [data](https://drive.google.com/file/d/1jkLf_6VZnG358mf2y6e4RTDi54WkChDI/view?usp=sharing) [model]()
+* WMT16 En-Ro Distilled: [data]() [model]()
+* WMT16 Ro-En Distilled: [data]() [model]()
+* IWSLT14 De-En Distilled: [data](https://drive.google.com/file/d/1F51UMYW-nHx8nhkX3JR1QVygfQBSoS6F/view?usp=sharing) [model]()
+* WMT14 En-De: [data]() [model]()
+* WMT14 De-En: [data](https://drive.google.com/file/d/1bSOAPb0xw-zgSaIvsOWzVqOJKzxeG9vz/view?usp=sharing) (same as WMT14 En-De) [model]()
+* WMT16 En-Ro: [data]() [model]()
+* WMT16 Ro-En: [data]() (same as WMT16 En-Ro) [model]()
+* IWSLT14 De-En: [data](https://drive.google.com/file/d/1v7Z-23-U5WV8KhlzrepMVR0J69zH-k0R/view?usp=sharing) [model]()
+
+## Usage
+
+### Data Preprocessing
 
 Throughout this Readme, we use `IWSLT14 De-En` as an example to show how to reproduce our results. First, we need to figure out the mapping from source length to target length. We simply use linear regression here: `target_length = max-len-a * source_length + max-len-b`, and we need to estimate `max-len-a` and `max-len-b` from training data. Note that directly using `max-len-a=1` and `max-len-b=0` would still reach reasonable performance.
 
@@ -37,7 +50,7 @@ fairseq-preprocess --source-lang de --target-lang en \
     --workers 20
 ```
 
-## Training
+### Training
 
 ```
 DATASET=iwslt14-de-en
@@ -65,22 +78,8 @@ CUDA_VISIBLE_DEVICES=0 fairseq-train $DATA_BIN --arch $ARCH --share-decoder-inpu
 
 We use a single GPU to train on IWSLT14 De-En. After training is done, we can use `checkpoints/iwslt14-de-en/checkpoint_best.pt` for generation.
 
-## Datasets & Pretrained Models
 
-The entire folder can be found at [here](https://drive.google.com/drive/folders/1G5Vl150cPyc5EWxxqRdngwUifccQeccN?usp=sharing). Data and model for individual datasets can be found at links below.
-
-* WMT14 En-De Distilled: [data]() [model]()
-* WMT14 De-En Distilled: [data](https://drive.google.com/file/d/1jkLf_6VZnG358mf2y6e4RTDi54WkChDI/view?usp=sharing) [model]()
-* WMT16 En-Ro Distilled: [data]() [model]()
-* WMT16 Ro-En Distilled: [data]() [model]()
-* IWSLT14 De-En Distilled: [data](https://drive.google.com/file/d/1F51UMYW-nHx8nhkX3JR1QVygfQBSoS6F/view?usp=sharing) [model]()
-* WMT14 En-De: [data]() [model]()
-* WMT14 De-En: [data](https://drive.google.com/file/d/1bSOAPb0xw-zgSaIvsOWzVqOJKzxeG9vz/view?usp=sharing) (same as WMT14 En-De) [model]()
-* WMT16 En-Ro: [data]() [model]()
-* WMT16 Ro-En: [data]() (same as WMT16 En-Ro) [model]()
-* IWSLT14 De-En: [data](https://drive.google.com/file/d/1v7Z-23-U5WV8KhlzrepMVR0J69zH-k0R/view?usp=sharing) [model]()
-
-## Generation
+### Generation
 
 As an example, let's generate from the above trained model. We use `topk = 32` and `rounds = 5`.
 
@@ -100,7 +99,7 @@ CUDA_VISIBLE_DEVICES=0 fairseq-generate $DATA_BIN --path $SAVE_DIR/checkpoint_be
 
 Note that using a model trained on a different dataset requires re-estimating `max-len-a` and `max-len-b`.
 
-## Multi-GPU Generation:
+### Multi-GPU Generation:
 
 Our approach is amenable to multi-GPU parallelization: we can even get further speedup at batch size 1 using multiple GPUs.
 
@@ -119,9 +118,9 @@ CUDA_VISIBLE_DEVICES=0,1,2 fairseq-generate $DATA_BIN --path $SAVE_DIR/checkpoin
 ```
 
 
-## Training on Other Datasets
+### Training on Other Datasets
 
-### WMT14 (raw/distilled) En-De/De-En
+#### WMT14 (raw/distilled) En-De/De-En
 
 For preprocessing, we need to use joined dictionary.
 
@@ -163,7 +162,7 @@ CUDA_VISIBLE_DEVICES=0,1,2 python train.py $DATA_BIN --arch $ARCH --share-all-em
     --max-update $MAX_UPDATES  --validation-max-size 3000 --validation-topk 16 --validation-D 3 --validation-rounds 5 --seed 1234
 ```
 
-### WMT16 (raw/distilled) En-Ro/Ro-En
+#### WMT16 (raw/distilled) En-Ro/Ro-En
 
 For preprocessing, we need to use joined dictionary.
 
