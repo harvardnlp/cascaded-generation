@@ -65,18 +65,20 @@ CUDA_VISIBLE_DEVICES=0 fairseq-train $DATA_BIN --arch $ARCH --share-decoder-inpu
 
 We use a single GPU to train on IWSLT14 De-En. After training is done, we can use `checkpoints/iwslt14-de-en/checkpoint_best.pt` for generation.
 
-## Pretrained Models
+## Datasets & Pretrained Models
 
-* WMT14 En-De Distilled:
-* WMT14 De-En Distilled:
-* WMT16 En-Ro Distilled:
-* WMT16 Ro-En Distilled:
-* IWSLT14 De-En Distilled:
-* WMT14 En-De:
-* WMT14 De-En:
-* WMT16 En-Ro:
-* WMT16 Ro-En:
-* IWSLT14 De-En:
+The entire folder can be found at [here](https://drive.google.com/drive/folders/1G5Vl150cPyc5EWxxqRdngwUifccQeccN?usp=sharing). Data and model for individual datasets can be found at links below.
+
+* WMT14 En-De Distilled: [data]() [model]()
+* WMT14 De-En Distilled: [data](https://drive.google.com/file/d/1jkLf_6VZnG358mf2y6e4RTDi54WkChDI/view?usp=sharing) [model]()
+* WMT16 En-Ro Distilled: [data]() [model]()
+* WMT16 Ro-En Distilled: [data]() [model]()
+* IWSLT14 De-En Distilled: [data](https://drive.google.com/file/d/1F51UMYW-nHx8nhkX3JR1QVygfQBSoS6F/view?usp=sharing) [model]()
+* WMT14 En-De: [data]() [model]()
+* WMT14 De-En: [data](https://drive.google.com/file/d/1bSOAPb0xw-zgSaIvsOWzVqOJKzxeG9vz/view?usp=sharing) (same as WMT14 En-De) [model]()
+* WMT16 En-Ro: [data]() [model]()
+* WMT16 Ro-En: [data]() (same as WMT16 En-Ro) [model]()
+* IWSLT14 De-En: [data](https://drive.google.com/file/d/1v7Z-23-U5WV8KhlzrepMVR0J69zH-k0R/view?usp=sharing) [model]()
 
 ## Generation
 
@@ -95,6 +97,8 @@ CUDA_VISIBLE_DEVICES=0 fairseq-generate $DATA_BIN --path $SAVE_DIR/checkpoint_be
     --batch-size $BATCH_SIZE --topk $TOPK --remove-bpe --D 3 --rounds $rounds \
     --max-len-a $MAX_LEN_A --max-len-b $MAX_LEN_B
 ```
+
+Note that using a model trained on a different dataset requires re-estimating `max-len-a` and `max-len-b`.
 
 ## Multi-GPU Generation:
 
