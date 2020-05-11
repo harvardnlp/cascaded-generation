@@ -88,6 +88,8 @@ DATA_BIN=data-bin/$DATASET
 SAVE_DIR=checkpoints/$DATASET
 TOPK=32
 rounds=5
+MAX_LEN_A=0.941281036889224
+MAX_LEN_B=0.8804326732522796
 CUDA_VISIBLE_DEVICES=0,1,2 fairseq-generate $DATA_BIN --path $SAVE_DIR/checkpoint_best.pt \
     --batch-size 1 --topk $TOPK --remove-bpe --D 3 --rounds $rounds --ngpus $NGPUS \
     --max-len-a $MAX_LEN_A --max-len-b $MAX_LEN_B
