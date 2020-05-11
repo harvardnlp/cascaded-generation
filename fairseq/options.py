@@ -523,7 +523,7 @@ def add_generation_args(parser):
                        help='distributed master port')
     group.add_argument('--ngpus', default=1, type=int, metavar='N',
                        help='beam size')
-    group.add_argument('--beam', default=5, type=int, metavar='N',
+    group.add_argument('--beam', default=5, type=float, metavar='N',
                        help='beam size')
     group.add_argument('--topk', default=5, type=int, metavar='N',
                        help='beam size')
@@ -535,6 +535,8 @@ def add_generation_args(parser):
                        help='beam size')
     group.add_argument('--usenew', default=0, type=int, metavar='N',
                        help='beam size')
+    group.add_argument('--usemarginals', default=0, type=int, metavar='N',
+                       help='use marginals instead of max marginals')
     group.add_argument('--cscore', default=0, type=int, metavar='N',
                        help='beam size')
     group.add_argument('--D', default=0, type=int, metavar='N',
@@ -544,7 +546,7 @@ def add_generation_args(parser):
     group.add_argument('--max-len-a', default=1.0, type=float, metavar='N',
                        help=('generate sequences of maximum length ax + b, '
                              'where x is the source length'))
-    group.add_argument('--max-len-b', default=0, type=int, metavar='N',
+    group.add_argument('--max-len-b', default=0, type=float, metavar='N',
                        help=('generate sequences of maximum length ax + b, '
                              'where x is the source length'))
     group.add_argument('--min-len', default=1, type=float, metavar='N',

@@ -57,6 +57,7 @@ def max_marginals(scores):
     suffix = ps[S, :, :]
     prefix = ps[P, :, :] 
     return (prefix.max(-2, keepdim=True)[0] + scores.transpose(-2, -1) + suffix.max(-1, keepdim=True)[0])[:, :N_orig]
+
 class SequenceGenerator(object):
     def __init__(
         self,
@@ -76,6 +77,7 @@ class SequenceGenerator(object):
         timesx=1,
         cscore=None,
         usenew=0,
+        usemarginals=0,
         ngpus=None,
         eos=None
     ):
@@ -104,6 +106,7 @@ class SequenceGenerator(object):
         """
         if usenew:
             import genbmm
+        self.usemarginals = usemarginals
         self.usenew = usenew
         self.ngpus = ngpus
         self.timesx = timesx
@@ -194,8 +197,8 @@ class SequenceGenerator(object):
 
         padding_idx = 1
         assert self.min_len == 1
-        assert self.max_len_a == 1
-        assert self.max_len_b == 0
+        #assert self.max_len_a == 1
+        #assert self.max_len_b == 0
         target_lengths = (self.max_len_a * src_lengths + self.max_len_b + 1).round().long() # + 1: target includes EOS
 
         length = target_lengths.max().item()
@@ -461,8 +464,8 @@ class SequenceGenerator(object):
                                fbs[ngram_probs.size(-1)] = foo.fb_max(ngram_probs.size(-1))
                            fb = fbs[ngram_probs.size(-1)]
                         if self.cscore == -9:
-                            dist = torch_struct.LinearChainCRF(ngram_probs.transpose(-1,-2))
-                            counts = dist.count
+                            dis = torch_struct.LinearChainCRF(ngram_probs.transpose(-1,-2))
+                            counts = dis.count
                             print (f'count order {order} ', counts)
                         with torch.no_grad():
                             marginal_time_start = time.time()
@@ -473,9 +476,20 @@ class SequenceGenerator(object):
                                 edge_max_marginals = max_marginals(ngram_probs)
                                 edge_marginals = edge_max_marginals.contiguous().transpose(-1, -2).contiguous()
 
+                            if self.cscore == -9:
+                                tmp = ngram_probs.data.clone()
+                                #tmp.fill_(0)
+                                #tmp[ngram_probs.eq(-float('inf'))] = -float('inf')
+                                dis = torch_struct.LinearChainCRF(tmp.transpose(-1,-2))
+                                marginals = dis.marginals.transpose(-1,-2)
+                                if self.beam_size > 0:
+                                    edge_marginals = edge_marginals + self.beam_size * marginals.log()
+                                if self.usemarginals == 1:
+                                    edge_marginals = marginals.log()
+
                             marginal_time = time.time() - marginal_time_start
                             time_spent['marginal_time'] += marginal_time
-                            scores, mapping = torch.topk(edge_marginals.view(bsz, length-order, -1), beam_size, -1) # bsz, length-1, beam_size
+                            _, mapping = torch.topk(edge_marginals.view(bsz, length-order, -1), beam_size, -1) # bsz, length-1, beam_size
                             # scores: 1, L-1, 500
                             mapping2 = mapping.to(device) #bsz,  length-1, K2
                             #import pdb; pdb.set_trace()

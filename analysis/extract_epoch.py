@@ -6,10 +6,17 @@ distilled = False
 base_dir = '/n/rush_lab/users/y/validation_logs/'
 dirs = ['wmt-en-ro-epoch', 'wmt-ro-en-epoch']
 dirs_val = ['wmt-en-ro-epoch-valid', 'wmt-ro-en-epoch-valid']
-dirs = ['wmt-en-de-distill-240k-epoch', 'wmt-de-en-distill-240k-epoch']
-dirs_val = ['wmt-en-de-distill-240k-epoch-valid', 'wmt-de-en-distill-240k-epoch-valid']
-if distilled:
-    dirs = [item + '-distill' for item in dirs]
+#dirs = ['wmt-en-de-distill-240k-epoch', 'wmt-de-en-distill-240k-epoch']
+#dirs_val = ['wmt-en-de-distill-240k-epoch-valid', 'wmt-de-en-distill-240k-epoch-valid']
+
+
+datasets = ['wmt-en-ro-distill-epoch-ab', 'wmt-ro-en-distill-epoch-ab', 'wmt-en-ro-epoch-ab', 'wmt-ro-en-epoch-ab', 'wmt-en-de-distill-epoch-ab', 'wmt-de-en-distill-epoch-ab', 'wmt-en-de-epoch-ab', 'wmt-de-en-epoch-ab']
+#if is_valid:
+#    datasets = [item + '-valid' for item in datasets]
+
+#dirs = datasets
+#if distilled:
+#    dirs = [item + '-distill' for item in dirs]
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
@@ -36,6 +43,7 @@ for d, d_val in zip(dirs, dirs_val):
         bleus_val = []
         d = os.path.join(base_dir, d)
         d_val = os.path.join(base_dir, d_val)
+        print (d)
         topk, rounds, D = get_topk_rounds_D(d)
         topk_val, rounds_val, D_val = get_topk_rounds_D(d_val)
     
