@@ -1,5 +1,7 @@
 # Cascade Transformer
 
+Here we provide code to reproduce our results. We both provide all training data and training scripts, as well as pretrained models used in our paper.
+
 # Prerequisites
 
 ```
@@ -58,6 +60,18 @@ CUDA_VISIBLE_DEVICES=0 fairseq-train $DATA_BIN --arch $ARCH --share-decoder-inpu
 
 We use a single GPU to train on IWSLT14 De-En. After training is done, we can use `checkpoints/iwslt14-de-en/checkpoint_best.pt` for generation.
 
+## Pretrained Models
+
+* WMT14 En-De Distilled:
+* WMT14 De-En Distilled:
+* WMT16 En-Ro Distilled:
+* WMT16 Ro-En Distilled:
+* IWSLT14 De-En Distilled:
+* WMT14 En-De:
+* WMT14 De-En:
+* WMT16 En-Ro:
+* WMT16 Ro-En:
+* IWSLT14 De-En:
 
 ## Generation
 
