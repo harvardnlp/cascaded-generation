@@ -49,11 +49,11 @@ CUDA_VISIBLE_DEVICES=0 fairseq-train $DATA_BIN --arch $ARCH --share-decoder-inpu
     --optimizer adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 --lr $LR --lr-scheduler inverse_sqrt \
     --warmup-updates $WARMUP_UPDATES --dropout $DROPOUT --weight-decay $WEIGHT_DECAY \
     --criterion label_smoothed_cross_entropy --label-smoothing 0.1 --max-tokens $MAX_TOKENS \
-    --eval-bleu --eval-bleu-args '\{"max_len_a": $MAX_LEN_A, "max_len_b": $MAX_LEN_B\}' \
+    --eval-bleu --eval-bleu-args '\{\"max_len_a\": $MAX_LEN_A, \"max_len_b\": $MAX_LEN_B\}' \
     --eval-bleu-detok moses --eval-bleu-remove-bpe --eval-bleu-print-samples \
     --best-checkpoint-metric bleu --maximize-best-checkpoint-metric --save-dir $SAVE_DIR \
     --max-update $MAX_UPDATES --validation-max-size 3000 \
-    --validation-topk 16 --validation-D 3 --validation-rounds 5 --seed 1234
+    --validation-topk 16 --validation-D 3 --validation-rounds 5 --seed 1234 --ngrams 5
 ```
 
 We use a single GPU to train on IWSLT14 De-En. After training is done, we can use `checkpoints/iwslt14-de-en/checkpoint_best.pt` for generation.
