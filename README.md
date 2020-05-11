@@ -1,6 +1,6 @@
 # Cascade Transformer
 
-Here we provide code to reproduce our results. We provide all training data and training scripts, as well as all pretrained models used in our paper. Our code is built on top of [fairseq](https://github.com/pytorch/fairseq).
+Here we provide code to reproduce our results. We provide all training data and training scripts, as well as all pretrained models used in our paper. Our code is built on top of [fairseq](https://github.com/pytorch/fairseq) and [pytorch-strcut](https://github.com/harvardnlp/pytorch-struct).
 
 # Prerequisites
 
