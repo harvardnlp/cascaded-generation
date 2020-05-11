@@ -5,6 +5,11 @@ Here we provide code to reproduce our results. We provide all training data and 
 # Prerequisites
 
 ```
+pip install -qU git+https://github.com/harvardnlp/pytorch-struct
+# Optional CUDA kernels for FastLogSemiring
+!pip install -qU git+https://github.com/harvardnlp/genbmm
+# For plotting.
+!pip install -q matplotlib
 pip install --editable .
 ```
 
