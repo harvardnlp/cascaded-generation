@@ -70,12 +70,21 @@ SAVE_DIR=checkpoints/$DATASET
 BATCH_SIZE=1
 TOPK=32
 rounds=5
-CUDA_VISIBLE_DEVICES=0 fairseq-generate $DATA_BIN --path $SAVE_DIR/checkpoint_best.pt --batch-size $BATCH_SIZE --topk $TOPK --remove-bpe --D 3 --rounds $rounds
+CUDA_VISIBLE_DEVICES=0 fairseq-generate $DATA_BIN --path $SAVE_DIR/checkpoint_best.pt \
+    --batch-size $BATCH_SIZE --topk $TOPK --remove-bpe --D 3 --rounds $rounds
 ```
 
 ## Multi-GPU Generation:
 
+Our approach is amenable to multi-GPU parallelization: we can even get further speedup at batch size 1 using multiple GPUs.
 
 ```
-CUDA_VISIBLE_DEVICES=0,1,2,3 fairseq-generate ../fairseq_vanilla/data-bin/wmt17_en_de_distill --path /n/rush_lab/users/y/checkpoints/barrier/en-de-distill/checkpoint_70_240000.pt  --batch-size 1 --topk 64 --remove-bpe --D 3 --rounds 5 --ngpus 4
+NGPUS=3
+DATASET=iwslt14-de-en
+DATA_BIN=data-bin/$DATASET
+SAVE_DIR=checkpoints/$DATASET
+TOPK=32
+rounds=5
+CUDA_VISIBLE_DEVICES=0,1,2 fairseq-generate $DATA_BIN --path $SAVE_DIR/checkpoint_best.pt \
+    --batch-size 1 --topk $TOPK --remove-bpe --D 3 --rounds $rounds --ngpus $NGPUS
 ```
