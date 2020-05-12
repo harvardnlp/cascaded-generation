@@ -13,7 +13,7 @@ pip install --editable .
 
 ## Datasets & Pretrained Models
 
-We only include `IWSLT14 De-En` in this repository. The entire folder can be found at [this link](https://drive.google.com/drive/folders/1G5Vl150cPyc5EWxxqRdngwUifccQeccN?usp=sharing). Data and model for individual datasets can be found at links below.
+We only include `IWSLT14 De-En` in this repository. Other datasets/models can be found at [this link](https://drive.google.com/drive/folders/1G5Vl150cPyc5EWxxqRdngwUifccQeccN?usp=sharing). Data and model for individual datasets can be found at links below.
 
 * WMT14 En-De Distilled: [data](https://drive.google.com/file/d/1EF9RpYpyuAnDIxxsxiGfG7Y1adTQIUXc/view?usp=sharing) [model](https://drive.google.com/file/d/1VwX6XVvWgGZV_Uq5feINeTcLlQp6pJFR/view?usp=sharing)
 * WMT14 De-En Distilled: [data](https://drive.google.com/file/d/1jkLf_6VZnG358mf2y6e4RTDi54WkChDI/view?usp=sharing) [model](https://drive.google.com/file/d/1BXN6VIbcjqmQjEtnDiTiSeSz000AFkdq/view?usp=sharing)
