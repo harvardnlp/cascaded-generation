@@ -15,16 +15,16 @@ pip install --editable .
 
 We only include `IWSLT14 De-En` in this repository. The entire folder can be found at [this link](https://drive.google.com/drive/folders/1G5Vl150cPyc5EWxxqRdngwUifccQeccN?usp=sharing). Data and model for individual datasets can be found at links below.
 
-* WMT14 En-De Distilled: [data](https://drive.google.com/file/d/1EF9RpYpyuAnDIxxsxiGfG7Y1adTQIUXc/view?usp=sharing) [model]()
-* WMT14 De-En Distilled: [data](https://drive.google.com/file/d/1jkLf_6VZnG358mf2y6e4RTDi54WkChDI/view?usp=sharing) [model]()
+* WMT14 En-De Distilled: [data](https://drive.google.com/file/d/1EF9RpYpyuAnDIxxsxiGfG7Y1adTQIUXc/view?usp=sharing) [model](https://drive.google.com/file/d/1VwX6XVvWgGZV_Uq5feINeTcLlQp6pJFR/view?usp=sharing)
+* WMT14 De-En Distilled: [data](https://drive.google.com/file/d/1jkLf_6VZnG358mf2y6e4RTDi54WkChDI/view?usp=sharing) [model](https://drive.google.com/file/d/1BXN6VIbcjqmQjEtnDiTiSeSz000AFkdq/view?usp=sharing)
 * WMT16 En-Ro Distilled: [data](https://drive.google.com/file/d/12guRd_-fj15EASfw8gMhfB-JvN29qZjS/view?usp=sharing) [model]()
 * WMT16 Ro-En Distilled: [data](https://drive.google.com/file/d/1-Qaq3f-bMTdpDpHXXGgGpEIMEALE3o8q/view?usp=sharing) [model]()
 * IWSLT14 De-En Distilled: [data](https://drive.google.com/file/d/1F51UMYW-nHx8nhkX3JR1QVygfQBSoS6F/view?usp=sharing) [model](https://drive.google.com/file/d/19cZ69uQF5PQFaJgdVgn989LT1gm5q5OF/view?usp=sharing)
-* WMT14 En-De: [data](https://drive.google.com/file/d/1Wexdn0nBT_0q3Uz6zLoYDvKvoV8wPjdm/view?usp=sharing) [model]()
-* WMT14 De-En: [data](https://drive.google.com/file/d/1bSOAPb0xw-zgSaIvsOWzVqOJKzxeG9vz/view?usp=sharing) (same as WMT14 En-De) [model]()
+* WMT14 En-De: [data](https://drive.google.com/file/d/1Wexdn0nBT_0q3Uz6zLoYDvKvoV8wPjdm/view?usp=sharing) [model](https://drive.google.com/file/d/1HFGUzDjNdcgC09wavfA3w0hVD1-zgJmr/view?usp=sharing)
+* WMT14 De-En: [data](https://drive.google.com/file/d/1bSOAPb0xw-zgSaIvsOWzVqOJKzxeG9vz/view?usp=sharing) (same as WMT14 En-De) [model](https://drive.google.com/file/d/1RRKhwLSYFeqTl9Kj-Kko4qaw-Dw8NhkK/view?usp=sharing)
 * WMT16 En-Ro: [data](https://drive.google.com/file/d/1Gl-WVAglCptG7dqrA1VeK8moRlee22T7/view?usp=sharing) [model]()
 * WMT16 Ro-En: [data](https://drive.google.com/file/d/1lSvQ86cM_sdTruya2WCTPsQYX4PHC4wo/view?usp=sharing) (same as WMT16 En-Ro) [model]()
-* IWSLT14 De-En: [data](https://drive.google.com/file/d/1v7Z-23-U5WV8KhlzrepMVR0J69zH-k0R/view?usp=sharing) [model]()
+* IWSLT14 De-En: [data](https://drive.google.com/file/d/1v7Z-23-U5WV8KhlzrepMVR0J69zH-k0R/view?usp=sharing) [model](https://drive.google.com/file/d/18K-kkSbV_NnXfxeXAjuxvrTb_zGc6r5s/view?usp=sharing)
 
 ## Usage
 
