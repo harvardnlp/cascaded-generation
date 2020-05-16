@@ -33,6 +33,18 @@ DEFAULT_MAX_SOURCE_POSITIONS = 1024
 DEFAULT_MAX_TARGET_POSITIONS = 1024
 
 
+def _mean_pooling(enc_feats, src_masks):
+    # enc_feats: T x B x C
+    # src_masks: B x T or None
+    if src_masks is None:
+        enc_feats = enc_feats.mean(0)
+    else:
+        src_masks = (~src_masks).transpose(0, 1).type_as(enc_feats)
+        enc_feats = (
+            (enc_feats / src_masks.sum(0)[None, :, None]) * src_masks[:, :, None]
+        ).sum(0)
+    return enc_feats
+
 @register_model("transformer")
 class TransformerModel(FairseqEncoderDecoderModel):
     """
@@ -88,10 +100,23 @@ class TransformerModel(FairseqEncoderDecoderModel):
         super().__init__(encoder, decoder)
         self.args = args
         self.supports_align_args = True
+        self.encoder_embed_dim = args.encoder_embed_dim
+        self.sg_length_pred = getattr(args, "sg_length_pred", True) # TODO
+        self.length_loss_factor = getattr(args, "length_loss_factor", 0.1)
+        self.pred_length_offset = getattr(args, "pred_length_offset", True)
+        self.embed_length = Embedding(256, self.encoder_embed_dim, None)
+
 
     @staticmethod
     def add_args(parser):
         """Add model-specific arguments to the parser."""
+        parser.add_argument("--sg-length-pred", action="store_true",
+                            help="stop the gradients back-propagated from the length predictor")
+        parser.add_argument("--length-loss-factor", type=float,
+                            help="weights on the length prediction loss")
+        parser.add_argument("--pred-length-offset", action="store_true",
+                            help="predicting the length difference between the target and source sentences")
+
         # fmt: off
         parser.add_argument('--activation-fn',
                             choices=utils.get_available_activation_fns(),
@@ -248,6 +273,8 @@ class TransformerModel(FairseqEncoderDecoderModel):
         cls_input: Optional[Tensor] = None,
         return_all_hiddens: bool = True,
         features_only: bool = False,
+        get_length: bool = False,
+        normalize: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
     ):
@@ -263,6 +290,8 @@ class TransformerModel(FairseqEncoderDecoderModel):
             cls_input=cls_input,
             return_all_hiddens=return_all_hiddens,
         )
+        if get_length:
+            length_out = self.forward_length(normalize, encoder_out)
         decoder_out = self.decoder(
             prev_output_tokens,
             encoder_out=encoder_out,
@@ -272,7 +301,41 @@ class TransformerModel(FairseqEncoderDecoderModel):
             src_lengths=src_lengths,
             return_all_hiddens=return_all_hiddens,
         )
-        return decoder_out
+        if get_length:
+            return decoder_out, length_out, self.length_loss_factor
+        else:
+            return decoder_out
+
+    def forward_length(self, normalize, encoder_out):
+        enc_feats = encoder_out.encoder_out  # T x B x C
+        src_masks = encoder_out.encoder_padding_mask  # B x T or None
+        enc_feats = _mean_pooling(enc_feats, src_masks)
+        if self.sg_length_pred:
+            enc_feats = enc_feats.detach()
+        length_out = F.linear(enc_feats, self.embed_length.weight)
+        return F.log_softmax(length_out, -1) if normalize else length_out
+
+    def forward_length_prediction(self, length_out, src_lengs, tgt_tokens=None):
+        #if self.pred_length_offset:
+
+        if tgt_tokens is not None:
+            # obtain the length target
+            tgt_lengs = tgt_tokens.ne(self.decoder.padding_idx).sum(1).long()
+            if self.pred_length_offset:
+                length_tgt = tgt_lengs - src_lengs + 128
+            else:
+                length_tgt = tgt_lengs
+            length_tgt = length_tgt.clamp(min=0, max=255)
+
+        else:
+            # predict the length target (greedy for now)
+            pred_lengs = length_out.max(-1)[1]
+            if self.pred_length_offset:
+                length_tgt = pred_lengs - 128 + src_lengs
+            else:
+                length_tgt = pred_lengs
+
+        return length_tgt
 
     # Since get_normalized_probs is in the Fairseq Model which is not scriptable,
     # I rewrite the get_normalized_probs from Base Class to call the
@@ -754,6 +817,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         tgt_length = prev_output_tokens.size(1)
         prev_output_tokens = prev_output_tokens.data.clone()
         #self.ids_ = None
+
         if is_cascade:
             offset = None
         elif self.training:
@@ -768,11 +832,9 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             prev_output_tokens[ids.eq(0)] = bos
             offset = offset.view(bsz, 1, 1).contiguous()
         elif is_translate:
-            assert False
             offset = None
-            #import pdb; pdb.set_trace()
-            if ngram+1 <= prev_output_tokens.size(1):
-                prev_output_tokens[:, -(ngram+1)] = bos
+            if self.ngrams <= prev_output_tokens.size(1):
+                prev_output_tokens[:, -(self.ngrams)] = bos
         else:
             #import pdb; pdb.set_trace()
             offset = None
@@ -849,7 +911,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                     encoder_states = encoder_out.encoder_states
                     assert encoder_states is not None
                     encoder_state = encoder_states[idx]
-                    assert False
                 else:
                     encoder_state = encoder_out.encoder_out
 
@@ -880,6 +941,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                     is_translate=is_translate,
                     is_cascade=is_cascade,
                     offset=offset,
+                    ngrams=self.ngrams,
                 )
                 if x[-1].ne(x[-1]).any():
                     print (x[-1].size())
@@ -1001,7 +1063,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 def Embedding(num_embeddings, embedding_dim, padding_idx):
     m = nn.Embedding(num_embeddings, embedding_dim, padding_idx=padding_idx)
     nn.init.normal_(m.weight, mean=0, std=embedding_dim ** -0.5)
-    nn.init.constant_(m.weight[padding_idx], 0)
+    if padding_idx is not None:
+        nn.init.constant_(m.weight[padding_idx], 0)
     return m
 
 

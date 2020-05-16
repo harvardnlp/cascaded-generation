@@ -108,6 +108,7 @@ class MultiheadAttention(nn.Module):
         query,
         key: Optional[Tensor],
         value: Optional[Tensor],
+        ngrams: Optional[int] = None,
         is_translate: Optional[bool] = False,
         is_cascade: Optional[bool] = False,
         offset: Optional[Tensor] = None,
@@ -141,8 +142,6 @@ class MultiheadAttention(nn.Module):
         if need_head_weights:
             need_weights = True
 
-        #if self.encoder_decoder_attention:
-        #    import pdb; pdb.set_trace()
         tgt_len, bsz, embed_dim = query.size()
         assert embed_dim == self.embed_dim
         assert list(query.size()) == [tgt_len, bsz, embed_dim]
@@ -211,7 +210,6 @@ class MultiheadAttention(nn.Module):
         q *= self.scaling
 
         if self.bias_k is not None:
-            assert False
             assert self.bias_v is not None
             k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
             v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
@@ -346,7 +344,6 @@ class MultiheadAttention(nn.Module):
             assert key_padding_mask.size(1) == src_len
 
         if self.add_zero_attn:
-            assert False
             assert v is not None
             src_len += 1
             k = torch.cat([k, k.new_zeros((k.size(0), 1) + k.size()[2:])], dim=1)
@@ -366,9 +363,7 @@ class MultiheadAttention(nn.Module):
                     dim=1,
                 )
 
-        #if self.encoder_decoder_attention:
-        #    import pdb; pdb.set_trace()
-        attn_weights = torch.bmm(q, k.transpose(1, 2)) # kbsz*num_heads, f, l
+        attn_weights = torch.bmm(q, k.transpose(1, 2))
         attn_weights = MultiheadAttention.apply_sparse_mask(attn_weights, tgt_len, src_len, bsz)
 
         if flag_cascade:
@@ -377,10 +372,10 @@ class MultiheadAttention(nn.Module):
             assert list(attn_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
 
         if attn_mask is not None:
-            #attn_mask = attn_mask.data.clone()
             assert not flag_cascade
             attn_mask = attn_mask.unsqueeze(0)
             if self.self_attention:
+                #import pdb; pdb.set_trace()
                 if is_cascade: # TODO: fully batching in batch dimension
                     import pdb; pdb.set_trace()
                     NGRAM = ngram + 1# validation
@@ -414,7 +409,7 @@ class MultiheadAttention(nn.Module):
                     #attn_mask[:, :, 0] = 0
                     attn_mask = attn_mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1).contiguous().view(-1, attn_mask.size(-1), attn_mask.size(-1)) # bsz, 1, 16, 16
                 elif not is_translate:
-                    NGRAM = 5# validation
+                    NGRAM = ngrams# validation TODO: use self.ngrams
                     attn_mask = attn_mask.repeat(bsz, 1, 1)
                     assert attn_mask.size(-1) == attn_mask.size(-2), attn_mask.size()
                     x, y = torch.meshgrid(torch.arange(attn_mask.size(-1)).to(attn_mask.device), torch.arange(attn_mask.size(-1)).to(attn_mask.device)) 
@@ -429,7 +424,7 @@ class MultiheadAttention(nn.Module):
                     #attn_mask[:, :, 0] = 0
                     attn_mask = attn_mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1).contiguous().view(-1, attn_mask.size(-1), attn_mask.size(-1)) # bsz, 1, 16, 16
                 else:
-                    NGRAM = 5 # translation
+                    NGRAM = ngrams # translation
                     attn_mask = attn_mask.repeat(bsz, 1, 1)
                     attn_mask.fill_(-float('inf'))
                     i = 1

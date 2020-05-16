@@ -236,6 +236,7 @@ class TransformerDecoderLayer(nn.Module):
         is_translate: Optional[bool] = False,
         is_cascade: Optional[bool] = False,
         offset: Optional[torch.Tensor] = None,
+        ngrams: Optional[int] = None,
     ):
         """
         Args:
@@ -303,6 +304,7 @@ class TransformerDecoderLayer(nn.Module):
             is_translate=is_translate,
             is_cascade=is_cascade,
             offset=offset,
+            ngrams=ngrams,
         )
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x

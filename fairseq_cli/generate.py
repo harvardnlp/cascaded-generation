@@ -91,6 +91,7 @@ def _main(args, output_file, rank=0, world_size=1, backend='NCCL', master_addr='
         models, _model_args = checkpoint_utils.load_model_ensemble(
             utils.split_paths(args.path),
             arg_overrides=eval(args.model_overrides),
+            strict=False, # TODO:
             task=task,
         )
 
