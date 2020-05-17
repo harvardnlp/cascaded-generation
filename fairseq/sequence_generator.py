@@ -195,10 +195,14 @@ class SequenceGenerator(object):
             k: v for k, v in sample['net_input'].items()
             if k != 'prev_output_tokens'
         }
+        #if D == 0:
+        #    import pdb; pdb.set_trace()
 
         src_tokens = encoder_input['src_tokens']
         id = sample['id'].item()
         src_lengths = (src_tokens.ne(self.eos) & src_tokens.ne(self.pad)).long().sum(dim=1)
+        tgt_tokens = sample['target']
+        target_lengths_orig = (tgt_tokens.ne(self.eos) & tgt_tokens.ne(self.pad)).long().sum(dim=1)
         input_size = src_tokens.size()
         # batch dimension goes first followed by source lengths
         bsz = input_size[0]
@@ -210,31 +214,37 @@ class SequenceGenerator(object):
         assert self.min_len == 1
         #assert self.max_len_a == 1
         #assert self.max_len_b == 0
-        target_lengths = (self.max_len_a * src_lengths + self.max_len_b + 1).round().long() # + 1: target includes EOS
-
-        length = target_lengths.max().item()
         #beam_len = self.tokens.view(-1).size(0)
 
+        ngpus_use = ngpus
+        if rank < ngpus_use:
+            encoder_outs = model.forward_encoder(encoder_input, clear_decoder=True)
+            #import pdb; pdb.set_trace()
+            normalize = True
+            #try:
+            length_out = model.forward_length(normalize, encoder_outs[0])
+            length_tgt, min_length_tgt, max_length_tgt = model.forward_length_prediction(length_out, sample['net_input']['src_lengths'], D=D)
+            target_lengths = length_tgt# + 1
+            length = target_lengths.max().item()
+            #except Exception as e:
+            #    pass
+        target_lengths_ab = (self.max_len_a * src_lengths + self.max_len_b + 1).round().long() # + 1: target includes EOS
+        length_ab = target_lengths_ab.max().item()
+
         if D > 0:
-            max_target_lengths = target_lengths + D
-            min_target_lengths = target_lengths - D
+            max_target_lengths = max_length_tgt#target_lengths + D
+            min_target_lengths = min_length_tgt#target_lengths - D
             min_target_lengths = min_target_lengths.clamp(min=self.min_len+1) # always produce sth
             max_target_lengths = torch.max(min_target_lengths, max_target_lengths)
 
             #max_target_lengths = max_target_lengths.clamp(min=beam_len+1) #TODO
             length = max_target_lengths.max().item() + 1
+
+        print ('---', length_ab)
+        print ('+++', length)
+        print ('***', target_lengths_orig)
         ngpus_use = min(length, ngpus)
         encoder_time_start = time.time()
-        if rank < ngpus_use:
-            encoder_outs = model.forward_encoder(encoder_input, clear_decoder=True)
-            #import pdb; pdb.set_trace()
-            normalize = True
-            try:
-                length_out = model.forward_length(normalize, encoder_outs[0])
-                length_tgt = model.forward_length_prediction(length_out, sample['net_input']['src_lengths'])
-                target_lengths = length_tgt
-            except Exception as e:
-                pass
 
 
         encoder_time = time.time() - encoder_time_start
@@ -1592,9 +1602,9 @@ class EnsembleModel(torch.nn.Module):
         assert len(self.models) == 1
         return self.models[0].forward_length(normalize, encoder_out)
 
-    def forward_length_prediction(self, length_out, encoder_out, tgt_tokens=None):
+    def forward_length_prediction(self, length_out, encoder_out, tgt_tokens=None, D=None):
         assert len(self.models) == 1
-        return self.models[0].forward_length_prediction(length_out, encoder_out, tgt_tokens)
+        return self.models[0].forward_length_prediction(length_out, encoder_out, tgt_tokens, D=D)
 
     @torch.no_grad()
     def forward_decoder(self, tokens, encoder_outs, temperature=1., disable_incremental_states=False, is_cascade=False, position=None):
