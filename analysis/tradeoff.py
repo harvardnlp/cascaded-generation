@@ -1,7 +1,7 @@
 import sys, os
 import re, subprocess
 
-dataset = 2
+dataset = 0
 
 if __name__ == '__main__':
     if len(sys.argv) != 3:
@@ -14,12 +14,12 @@ with open(sys.argv[1]) as fin:
         for line in fin:
             items = line.strip().split('&')
             name = items[0]
-            m = re.match(r'.*?topk\s*=\s*(\d+).*?', name)
+            m = re.match(r'.*?K\s*=\s*(\d+).*?', name)
             assert m, name
-            topk = int(m.group(1))
-            if topk > 128:
+            K = int(m.group(1))
+            if K > 128:
                 continue
-            #print (topk)
+            #print (K)
             m = re.match(r'.*?rounds\s*=\s*(\d+).*?', name)
             assert m, name
             rounds = int(m.group(1))
@@ -40,7 +40,7 @@ with open(sys.argv[1]) as fin:
             latency = m.group(1)
             latency = float(latency)
 
-            fout.write(f'{topk}\t{rounds}\t{D}\t{bleu}\t{latency}\n')
+            fout.write(f'{K}\t{rounds}\t{D}\t{bleu}\t{latency}\n')
 
             #print (D)
 

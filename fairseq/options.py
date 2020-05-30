@@ -539,6 +539,8 @@ def add_generation_args(parser):
                        help='use marginals instead of max marginals')
     group.add_argument('--cscore', default=0, type=int, metavar='N',
                        help='beam size')
+    group.add_argument('--nominlen', default=0, type=int, metavar='N',
+                       help='beam size')
     group.add_argument('--D', default=0, type=int, metavar='N',
                        help='beam size')
     group.add_argument('--nbest', default=1, type=int, metavar='N',
@@ -559,7 +561,7 @@ def add_generation_args(parser):
                        help='compare unnormalized hypothesis scores')
     group.add_argument('--no-beamable-mm', action='store_true',
                        help='don\'t use BeamableMM in attention layers')
-    group.add_argument('--lenpen', default=1, type=float,
+    group.add_argument('--lenpen', default=0, type=float,
                        help='length penalty: <1.0 favors shorter, >1.0 favors longer sentences')
     group.add_argument('--unkpen', default=0, type=float,
                        help='unknown word penalty: <0 produces more unks, >0 produces fewer')

@@ -43,6 +43,7 @@ is_valid = True
 datasets = ['wmt-en-ro-distill-epoch-ab', 'wmt-ro-en-distill-epoch-ab', 'wmt-en-ro-epoch-ab', 'wmt-ro-en-epoch-ab', 'wmt-en-de-distill-epoch-ab', 'wmt-de-en-distill-epoch-ab', 'wmt-en-de-epoch-ab', 'wmt-de-en-epoch-ab', 'iwslt-distill-epoch-ab', 'iwslt-epoch-ab']
 datasets = ['wmt-en-ro-distill-epoch-ab', 'wmt-ro-en-distill-epoch-ab', 'wmt-en-ro-epoch-ab', 'wmt-ro-en-epoch-ab', 'wmt-en-de-distill-epoch-ab', 'wmt-de-en-distill-epoch-ab', 'wmt-en-de-epoch-ab', 'wmt-de-en-epoch-ab']
 datasets = ['wmt-en-de-epoch-ab']
+datasets = ['wmt-en-de-epoch-ab']
 
 if is_valid:
     datasets = [item + '-valid' for item in datasets]

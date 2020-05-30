@@ -16,7 +16,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     xs, ys, ds = [], [], []
-    assert 'iwslt' in sys.argv[1]
+    #assert 'iwslt' in sys.argv[1]
     with open(sys.argv[1]) as fin:
         for line in fin:
             items = line.strip().split('\t')
@@ -30,7 +30,10 @@ if __name__ == '__main__':
             ys.append(bleu)
             ds.append(D)
     xs = torch.Tensor(xs)
-    xs = 229.76*xs
+    #xs = 229.76*xs
+    #xs = 318.85*xs # wmt en-de
+    #330.55872330
+    xs = 330.55872330*xs # wmt en-de
     ys = torch.Tensor(ys)
     ds = torch.LongTensor(ds)
 
@@ -49,7 +52,7 @@ if __name__ == '__main__':
     plt.plot(x, y, 'k.')
     plt.ylabel('BLEU')
     plt.xlabel('Speedup')
-    plt.ylim(32, 35)
+    #plt.ylim(32, 35)
     plt.legend(['D=0', 'D=1', 'D=2', 'D=3'], loc='upper right')
     plt.tight_layout()
     #fig.subplots_adjust(bottom=0.3)

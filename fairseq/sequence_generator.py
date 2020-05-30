@@ -76,6 +76,7 @@ class SequenceGenerator(object):
         search_strategy=None,
         timesx=1,
         cscore=None,
+        nominlen=None,
         usenew=0,
         usemarginals=0,
         ngpus=None,
@@ -106,6 +107,7 @@ class SequenceGenerator(object):
         """
         if usenew:
             import genbmm
+        self.nominlen = nominlen
         self.usemarginals = usemarginals
         self.usenew = usenew
         self.ngpus = ngpus
@@ -220,30 +222,61 @@ class SequenceGenerator(object):
         if rank < ngpus_use:
             encoder_outs = model.forward_encoder(encoder_input, clear_decoder=True)
             #import pdb; pdb.set_trace()
-            normalize = True
-            #try:
-            length_out = model.forward_length(normalize, encoder_outs[0])
-            length_tgt, min_length_tgt, max_length_tgt = model.forward_length_prediction(length_out, sample['net_input']['src_lengths'], D=D)
-            target_lengths = length_tgt# + 1
-            length = target_lengths.max().item()
-            #except Exception as e:
-            #    pass
-        target_lengths_ab = (self.max_len_a * src_lengths + self.max_len_b + 1).round().long() # + 1: target includes EOS
-        length_ab = target_lengths_ab.max().item()
+            #normalize = True
+            ##try:
+            ##if D == 11 or D == 9:
+            #if D == 11 or D == 9 or D == 2 or D == 4 or D == 6 or D == 8 or D == 10:
+            #    length_out = model.forward_length(normalize, encoder_outs[0])
+            #    threshold = 0.9
+            #    if D == 11:
+            #        get_probs=True
+            #        length_tgt, min_length_tgt, max_length_tgt, probs = model.forward_length_prediction(length_out, sample['net_input']['src_lengths'], D=D, get_probs=get_probs, threshold=threshold)
+            #    else:
+            #        get_probs=False
+            #        length_tgt, min_length_tgt, max_length_tgt = model.forward_length_prediction(length_out, sample['net_input']['src_lengths'], D=D, get_probs=get_probs)
+            #    target_lengths = length_tgt# + 1
+            #    length = target_lengths.max().item()
+            ##except Exception as e:
+            ##    pass
+        #target_lengths_ab = (self.max_len_a * src_lengths + self.max_len_b + 1).round().long() # + 1: target includes EOS
+        #length_ab = target_lengths_ab.max().item()
+        target_lengths = (self.max_len_a * src_lengths + self.max_len_b + 1).round().long() # + 1: target includes EOS
+
+        #target_lengths = target_lengths_orig + 1
+
+        max_len = int(math.floor(100 * 128 / topk))
+        #print (f'count order L ', target_lengths.max() * topk)
+        target_lengths = target_lengths.clamp(max=max_len)
+        length = target_lengths.max().item()
 
         if D > 0:
-            max_target_lengths = max_length_tgt#target_lengths + D
-            min_target_lengths = min_length_tgt#target_lengths - D
+            #if D == 11 or D == 9 or D == 2 or D == 4 or D == 6 or D == 8 or D == 10:
+            #    max_target_lengths = max_length_tgt#target_lengths + D
+            #    min_target_lengths = min_length_tgt#target_lengths - D
+            #else:
+            #    max_target_lengths = target_lengths_ab + D
+            #    min_target_lengths = target_lengths_ab - D
+            max_target_lengths = target_lengths + D
+            min_target_lengths = target_lengths - D
             min_target_lengths = min_target_lengths.clamp(min=self.min_len+1) # always produce sth
+            #if True or D == 10:
+            if self.nominlen == 1:
+                assert False
+                min_target_lengths.fill_(2)
             max_target_lengths = torch.max(min_target_lengths, max_target_lengths)
 
             #max_target_lengths = max_target_lengths.clamp(min=beam_len+1) #TODO
             length = max_target_lengths.max().item() + 1
 
-        print ('---', length_ab)
-        print ('+++', length)
-        print ('***', target_lengths_orig)
+        #print ('baseline', length_ab)
+        #print ('---', min_target_lengths)
+        #print ('+++', max_target_lengths)
+        #print ('***', target_lengths_orig)
+        #if D == 11:
+        #    print(probs.exp())
+        #    print(torch.cumsum(probs.exp().view(-1), 0))
         ngpus_use = min(length, ngpus)
+        #print ('length', length)
         encoder_time_start = time.time()
 
 
@@ -257,24 +290,24 @@ class SequenceGenerator(object):
         device = src_tokens.device
         finalized = [[] for i in range(bsz)]
         chunk_size = length // ngpus_use # chunk_size should not change
-        debug_flag = False
-        if length > 20:
-            debug_flag = True
-        debug_flag = False
-        if debug_flag:
-            #import pdb; pdb.set_trace()
-            #must = torch.LongTensor([[   58, 13292,    10, 27109, 16899,    48,   107,  4923,     9, 13292, 21, 27109, 16899,   500,   403,   814,  4923,    18,  2940,     5, 2],
-            #                         [ 1027,    54,  8190,  4071,    18,  2260,     4,    22,     9,   869, 33,     9,   606,    29,   500,  2818,    13,  2772, 13958,     5, 2],
-            #                         [ 3553,     4,  4437,    10,  4739,   105,   534,     4,    84,  6495, 9141,   411,   376,  3363,  1750,  6381,   783,    18,  3517,     5, 2],
-            #                         [   98,    22,    42,   589,     4,    68,   157,    71, 20561, 11139, 43,  2633,   350,     7,  5657,    18,   648,  1965,   491,     5, 2],
-            #                         [ 1747, 12980,   151,    10, 20782,    15,  8224,    33,   889,  3404, 10, 20782,    33,   889,  3404,    10, 20782,    10,  5757,     5, 2],
-            #                         [  842,  4531,    10,  1831, 14081,    40, 13702,   478,  4671,  2026, 15,  7036,   192,   120, 13894, 10800,    32, 12889, 23004,     5, 2],
-            #                         [ 1921,  4554,   865,    29,   584,    10,  6599, 35595,  7839,  2506, 372,   677,    67,  1921,  4554,     9,  6893,    92,   808,     5, 2]]).to(device)
-            must = self.tokens.to(device)
-        #if must.view(-1).size(0) > length-1:
-        #    print ('SHORTER')
-        #encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
-        #save_mask = None
+        #debug_flag = False
+        #if length > 20:
+        #    debug_flag = True
+        #debug_flag = False
+        #if debug_flag:
+        #    #import pdb; pdb.set_trace()
+        #    #must = torch.LongTensor([[   58, 13292,    10, 27109, 16899,    48,   107,  4923,     9, 13292, 21, 27109, 16899,   500,   403,   814,  4923,    18,  2940,     5, 2],
+        #    #                         [ 1027,    54,  8190,  4071,    18,  2260,     4,    22,     9,   869, 33,     9,   606,    29,   500,  2818,    13,  2772, 13958,     5, 2],
+        #    #                         [ 3553,     4,  4437,    10,  4739,   105,   534,     4,    84,  6495, 9141,   411,   376,  3363,  1750,  6381,   783,    18,  3517,     5, 2],
+        #    #                         [   98,    22,    42,   589,     4,    68,   157,    71, 20561, 11139, 43,  2633,   350,     7,  5657,    18,   648,  1965,   491,     5, 2],
+        #    #                         [ 1747, 12980,   151,    10, 20782,    15,  8224,    33,   889,  3404, 10, 20782,    33,   889,  3404,    10, 20782,    10,  5757,     5, 2],
+        #    #                         [  842,  4531,    10,  1831, 14081,    40, 13702,   478,  4671,  2026, 15,  7036,   192,   120, 13894, 10800,    32, 12889, 23004,     5, 2],
+        #    #                         [ 1921,  4554,   865,    29,   584,    10,  6599, 35595,  7839,  2506, 372,   677,    67,  1921,  4554,     9,  6893,    92,   808,     5, 2]]).to(device)
+        #    must = self.tokens.to(device)
+        ##if must.view(-1).size(0) > length-1:
+        ##    print ('SHORTER')
+        ##encoder_outs = model.reorder_encoder_out(encoder_outs, new_order)
+        ##save_mask = None
         for order, beam_size in enumerate(beam_sizes):
             length_needed = length-order
             prev_ngpus_use = ngpus_use
@@ -388,21 +421,21 @@ class SequenceGenerator(object):
                     if rank < ngpus_use:
                         all_tokens.append(mapping.unsqueeze(-1))
 
-                        if debug_flag:
-                            for b in range(bsz):
-                                for l in range(all_tokens[-1].size(1)):
-                                    flag = False
-                                    for k in range(all_tokens[-1].size(-2)):
-                                        tok = all_tokens[-1][b][l][k] # order
-                                        tok_must = must[b][l:(l+tok.size(0))]
-                                        if tok_must.eq(tok).all():
-                                            flag = True
-                                    if not flag:
-                                        #import pdb; pdb.set_trace()
-                                        score_must = unigram_probs[b][l][tok_must.item()]
-                                        r = unigram_probs[b][l].gt(score_must).sum().item()
-                                        print (f'Non {id}: {order} {l} {all_tokens[-1].size(1)} {r}')
-                                        debug_flag = False
+                        #if debug_flag:
+                        #    for b in range(bsz):
+                        #        for l in range(all_tokens[-1].size(1)):
+                        #            flag = False
+                        #            for k in range(all_tokens[-1].size(-2)):
+                        #                tok = all_tokens[-1][b][l][k] # order
+                        #                tok_must = must[b][l:(l+tok.size(0))]
+                        #                if tok_must.eq(tok).all():
+                        #                    flag = True
+                        #            if not flag:
+                        #                #import pdb; pdb.set_trace()
+                        #                score_must = unigram_probs[b][l][tok_must.item()]
+                        #                r = unigram_probs[b][l].gt(score_must).sum().item()
+                        #                print (f'Non {id}: {order} {l} {all_tokens[-1].size(1)} {r}')
+                        #                debug_flag = False
                         if rank == 0:
                             probs = scores[:, 0].contiguous() # bsz, K
                         next_words = mapping[:, 1:] # bsz, L-1, K
@@ -520,15 +553,31 @@ class SequenceGenerator(object):
                     next_words = next_words[:, offset_start:offset_end]
                     next_words = next_words.unsqueeze(-2).expand(-1, -1, prev_beam_sizes[-1], -1) # bsz, L-1, K, K
                     # TODO:
-                    if debug_flag:
-                        ngram_probs_orig = ngram_probs
+                    #if debug_flag:
+                    #    ngram_probs_orig = ngram_probs
                     next_scores = ngram_probs.gather(-1, next_words) # bsz, L-1, K, K
                     ids = torch.arange(offset_start, offset_end).view(1, -1).expand(bsz, -1).to(device) # bsz, l
                     if D == 0:
-                        mask = ids.ge(target_lengths.view(-1, 1)-1-order)
-                        mask_rev = ids.lt(target_lengths.view(-1, 1)-1-order)
+                        #mask = ids.gt(target_lengths.view(-1, 1)-1-order)
+                        #next_scores[mask] = -float('inf')
+                        #next_scores[mask.unsqueeze(-1).unsqueeze(-1) & next_words.eq(2)] = 0
+                        #mask2 = ids.eq(target_lengths.view(-1, 1)-1-order)
+                        #next_scores[mask2.unsqueeze(-1).unsqueeze(-1) & next_words.ne(2)] = -float('inf')
+                        #mask3 = ids.lt(target_lengths.view(-1, 1)-1-order)
+                        #next_scores[mask3.unsqueeze(-1).unsqueeze(-1) & next_words.eq(2)] = -float('inf')
+                        #TODO: mask = ids.ge(target_lengths.view(-1, 1)-1-order)
+                        #TODO: mask_rev = ids.lt(target_lengths.view(-1, 1)-1-order)
+                        #TODO: next_scores[mask] = -float('inf')
+                        #TODO: next_scores[mask.unsqueeze(-1).unsqueeze(-1) & next_words.eq(2)] = 0
+                        #TODO: next_scores[mask_rev.unsqueeze(-1).unsqueeze(-1) & next_words.eq(2)] = -float('inf')
+                        mask = ids.gt(target_lengths.view(-1, 1)-1-order)
                         next_scores[mask] = -float('inf')
                         next_scores[mask.unsqueeze(-1).unsqueeze(-1) & next_words.eq(2)] = 0
+                        mask = ids.eq(target_lengths.view(-1, 1)-1-order)
+                        #next_scores[mask] = -float('inf')
+                        next_scores[mask.unsqueeze(-1).unsqueeze(-1) & next_words.ne(2)] = -float('inf')
+                        #next_scores[mask.unsqueeze(-1).unsqueeze(-1) & next_words.eq(2)] = 0
+                        mask_rev = ids.lt(target_lengths.view(-1, 1)-1-order)
                         next_scores[mask_rev.unsqueeze(-1).unsqueeze(-1) & next_words.eq(2)] = -float('inf')
                     elif D > 0:
                         mask = ids.gt(max_target_lengths.view(-1, 1)-1-order)
@@ -539,10 +588,12 @@ class SequenceGenerator(object):
                             last_words = prev_output_tokens[:, -1].contiguous().view(bsz, offset_length, -1) # bsz, length-order, K
                         mask_pad = last_words.eq(1)
                         next_scores[mask_pad] = -float('inf') # pad to nothing
-                        next_scores[mask_pad.unsqueeze(-1) & next_words.eq(1)] = 0 # pad to pad
+                        gamma = self.len_penalty
+                        #gamma = -0.5
+                        next_scores[mask_pad.unsqueeze(-1) & next_words.eq(1)] = gamma # pad to pad
                         mask_eos = last_words.eq(2)
                         next_scores[mask_eos] = -float('inf') # </s> to nothing
-                        next_scores[mask_eos.unsqueeze(-1) & next_words.eq(1)] = 0 # </s> to pad
+                        next_scores[mask_eos.unsqueeze(-1) & next_words.eq(1)] = gamma # </s> to pad
                     if rank == 0:
                         next_scores[:, 0] = next_scores[:, 0] + probs.unsqueeze(-1)
 
@@ -661,30 +712,30 @@ class SequenceGenerator(object):
                         next_words = prev_mapping_last_y_idx[:, 1:, :, 0] # bsz, L-2, K
                         mapping2 = torch.cat([prev_mapping_x_idx, prev_mapping_last_y_idx], -1) # bsz, L-1, K2, 2
                         all_tokens.append(mapping2)
-                        if debug_flag:
-                            for b in range(bsz):
-                                k_same = None
-                                flag_cont = False
-                                for l in range(all_tokens[-1].size(1)):
-                                    flag = False
-                                    for k in range(all_tokens[-1].size(-2)):
-                                        tok = all_tokens[-1][b][l][k] # order
-                                        tok_must = must[b][l:(l+tok.size(0))]
-                                        if tok.size(0) != tok_must.size(0):
-                                            flag_cont = True
-                                            continue
-                                        if tok_must[:-1].eq(tok[:-1]).all():
-                                            k_same = k
-                                            if tok_must.eq(tok).all():
-                                                flag = True
-                                    if flag_cont:
-                                        continue
-                                    if not flag:
-                                        assert k_same is not None
-                                        score_must = ngram_probs_orig[b][l][k_same][tok_must[-1].item()]
-                                        r = ngram_probs_orig[b][l].gt(score_must).sum().item()
-                                        print (f'Non {id}: {order} {l} {all_tokens[-1].size(1)} {r}')
-                                        debug_flag = False
+                        #if debug_flag:
+                        #    for b in range(bsz):
+                        #        k_same = None
+                        #        flag_cont = False
+                        #        for l in range(all_tokens[-1].size(1)):
+                        #            flag = False
+                        #            for k in range(all_tokens[-1].size(-2)):
+                        #                tok = all_tokens[-1][b][l][k] # order
+                        #                tok_must = must[b][l:(l+tok.size(0))]
+                        #                if tok.size(0) != tok_must.size(0):
+                        #                    flag_cont = True
+                        #                    continue
+                        #                if tok_must[:-1].eq(tok[:-1]).all():
+                        #                    k_same = k
+                        #                    if tok_must.eq(tok).all():
+                        #                        flag = True
+                        #            if flag_cont:
+                        #                continue
+                        #            if not flag:
+                        #                assert k_same is not None
+                        #                score_must = ngram_probs_orig[b][l][k_same][tok_must[-1].item()]
+                        #                r = ngram_probs_orig[b][l].gt(score_must).sum().item()
+                        #                print (f'Non {id}: {order} {l} {all_tokens[-1].size(1)} {r}')
+                        #                debug_flag = False
                         prev_beam_sizes.append(beam_size)
                 else:
                     if rank == 0:
@@ -1602,9 +1653,9 @@ class EnsembleModel(torch.nn.Module):
         assert len(self.models) == 1
         return self.models[0].forward_length(normalize, encoder_out)
 
-    def forward_length_prediction(self, length_out, encoder_out, tgt_tokens=None, D=None):
+    def forward_length_prediction(self, length_out, encoder_out, tgt_tokens=None, D=None, get_probs=False, threshold=None):
         assert len(self.models) == 1
-        return self.models[0].forward_length_prediction(length_out, encoder_out, tgt_tokens, D=D)
+        return self.models[0].forward_length_prediction(length_out, encoder_out, tgt_tokens, D=D, get_probs=get_probs, threshold=threshold)
 
     @torch.no_grad()
     def forward_decoder(self, tokens, encoder_outs, temperature=1., disable_incremental_states=False, is_cascade=False, position=None):
