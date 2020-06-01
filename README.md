@@ -15,16 +15,16 @@ pip install --editable .
 
 We only include `IWSLT14 De-En` in this repository. Other datasets/models can be found at [this link](https://drive.google.com/drive/folders/1G5Vl150cPyc5EWxxqRdngwUifccQeccN?usp=sharing). Data, models, validation and test logs for individual datasets can be found at links below.
 
-* WMT14 En-De Distilled: [data](https://drive.google.com/file/d/1EF9RpYpyuAnDIxxsxiGfG7Y1adTQIUXc/view?usp=sharing) [model](https://drive.google.com/file/d/1VwX6XVvWgGZV_Uq5feINeTcLlQp6pJFR/view?usp=sharing) [val logs](logs_val/wmt14-en-de-distill) [test logs](logs_test/wmt14-en-de-distill)
-* WMT14 De-En Distilled: [data](https://drive.google.com/file/d/1jkLf_6VZnG358mf2y6e4RTDi54WkChDI/view?usp=sharing) [model](https://drive.google.com/file/d/1BXN6VIbcjqmQjEtnDiTiSeSz000AFkdq/view?usp=sharing) [val logs](logs_val/wmt14-de-en-distill) [test logs](logs_test/wmt14-de-en-distill)
-* WMT16 En-Ro Distilled: [data](https://drive.google.com/file/d/12guRd_-fj15EASfw8gMhfB-JvN29qZjS/view?usp=sharing) [model](https://drive.google.com/file/d/1vUgHKQHbeH06c08BEPoOk-a3EFKF7PpB/view?usp=sharing) [val logs](logs_val/wmt16-en-ro-distill) [test logs](logs_test/wmt16-en-ro-distill)
-* WMT16 Ro-En Distilled: [data](https://drive.google.com/file/d/1-Qaq3f-bMTdpDpHXXGgGpEIMEALE3o8q/view?usp=sharing) [model](https://drive.google.com/file/d/1j-maWwJ6j9NT3uC_A_4qw2jnL6oW-ntl/view?usp=sharing) [val logs](logs_val/wmt16-ro-en-distill) [test logs](logs_test/wmt16-ro-en-distill)
-* IWSLT14 De-En Distilled: [data](https://drive.google.com/file/d/1F51UMYW-nHx8nhkX3JR1QVygfQBSoS6F/view?usp=sharing) [model](https://drive.google.com/file/d/19cZ69uQF5PQFaJgdVgn989LT1gm5q5OF/view?usp=sharing) [val logs](logs_val/iwslt14-de-en-distill) [test logs](logs_test/iwslt14-de-en-distill)
-* WMT14 En-De: [data](https://drive.google.com/file/d/1Wexdn0nBT_0q3Uz6zLoYDvKvoV8wPjdm/view?usp=sharing) [model](https://drive.google.com/file/d/1HFGUzDjNdcgC09wavfA3w0hVD1-zgJmr/view?usp=sharing) [val logs](logs_val/wmt14-en-de) [test logs](logs_test/wmt14-en-de)
-* WMT14 De-En: [data](https://drive.google.com/file/d/1bSOAPb0xw-zgSaIvsOWzVqOJKzxeG9vz/view?usp=sharing) (same as WMT14 En-De) [model](https://drive.google.com/file/d/1RRKhwLSYFeqTl9Kj-Kko4qaw-Dw8NhkK/view?usp=sharing) [val logs](logs_val/wmt14-de-en) [test logs](logs_test/wmt14-de-en)
-* WMT16 En-Ro: [data](https://drive.google.com/file/d/1Gl-WVAglCptG7dqrA1VeK8moRlee22T7/view?usp=sharing) [model](https://drive.google.com/file/d/1VV3Mp6MgCneKgMtGAPiq0njuM7expnNV/view?usp=sharing) [val logs](logs_val/wmt16-en-ro) [test logs](logs_test/wmt16-en-ro)
-* WMT16 Ro-En: [data](https://drive.google.com/file/d/1lSvQ86cM_sdTruya2WCTPsQYX4PHC4wo/view?usp=sharing) (same as WMT16 En-Ro) [model](https://drive.google.com/file/d/1EixvleFCNQTceIJFt4OcgeoalSGKKEvq/view?usp=sharing) [val logs](logs_val/wmt16-ro-en) [test logs](logs_test/wmt16-ro-en)
-* IWSLT14 De-En: [data](https://drive.google.com/file/d/1v7Z-23-U5WV8KhlzrepMVR0J69zH-k0R/view?usp=sharing) [model](https://drive.google.com/file/d/18K-kkSbV_NnXfxeXAjuxvrTb_zGc6r5s/view?usp=sharing) [val logs](logs_val/iwslt14-de-en) [test logs](logs_test/iwslt14-de-en)
+* WMT14 En-De Distilled: [data](https://drive.google.com/file/d/1EF9RpYpyuAnDIxxsxiGfG7Y1adTQIUXc/view?usp=sharing) [model](https://drive.google.com/file/d/1VwX6XVvWgGZV_Uq5feINeTcLlQp6pJFR/view?usp=sharing) [val logs](logs_val/wmt14-en-de-distill) [test logs](logs_test/wmt14-en-de-distill) `max-len-a`: 0.9806108887946017, `max-len-b`: 0.8722537432612825
+* WMT14 De-En Distilled: [data](https://drive.google.com/file/d/1jkLf_6VZnG358mf2y6e4RTDi54WkChDI/view?usp=sharing) [model](https://drive.google.com/file/d/1BXN6VIbcjqmQjEtnDiTiSeSz000AFkdq/view?usp=sharing) [val logs](logs_val/wmt14-de-en-distill) [test logs](logs_test/wmt14-de-en-distill) `max-len-a`: 0.916756767932658, `max-len-b`: 0.9342969197602784
+* WMT16 En-Ro Distilled: [data](https://drive.google.com/file/d/12guRd_-fj15EASfw8gMhfB-JvN29qZjS/view?usp=sharing) [model](https://drive.google.com/file/d/1vUgHKQHbeH06c08BEPoOk-a3EFKF7PpB/view?usp=sharing) [val logs](logs_val/wmt16-en-ro-distill) [test logs](logs_test/wmt16-en-ro-distill) `max-len-a`: 0.9883130097474603, `max-len-b`: 0.9633488906317602
+* WMT16 Ro-En Distilled: [data](https://drive.google.com/file/d/1-Qaq3f-bMTdpDpHXXGgGpEIMEALE3o8q/view?usp=sharing) [model](https://drive.google.com/file/d/1j-maWwJ6j9NT3uC_A_4qw2jnL6oW-ntl/view?usp=sharing) [val logs](logs_val/wmt16-ro-en-distill) [test logs](logs_test/wmt16-ro-en-distill) `max-len-a`: 0.9248859339993715, `max-len-b`: 0.8017646630157031
+* IWSLT14 De-En Distilled: [data](https://drive.google.com/file/d/1F51UMYW-nHx8nhkX3JR1QVygfQBSoS6F/view?usp=sharing) [model](https://drive.google.com/file/d/19cZ69uQF5PQFaJgdVgn989LT1gm5q5OF/view?usp=sharing) [val logs](logs_val/iwslt14-de-en-distill) [test logs](logs_test/iwslt14-de-en-distill) `max-len-a`: 0.8853894031751983, `max-len-b`: 0.9270677277453601
+* WMT14 En-De: [data](https://drive.google.com/file/d/1Wexdn0nBT_0q3Uz6zLoYDvKvoV8wPjdm/view?usp=sharing) [model](https://drive.google.com/file/d/1HFGUzDjNdcgC09wavfA3w0hVD1-zgJmr/view?usp=sharing) [val logs](logs_val/wmt14-en-de) [test logs](logs_test/wmt14-en-de) `max-len-a`: 0.9799950605387177, `max-len-b`: 1.2678756896665853
+* WMT14 De-En: [data](https://drive.google.com/file/d/1bSOAPb0xw-zgSaIvsOWzVqOJKzxeG9vz/view?usp=sharing) (same as WMT14 En-De) [model](https://drive.google.com/file/d/1RRKhwLSYFeqTl9Kj-Kko4qaw-Dw8NhkK/view?usp=sharing) [val logs](logs_val/wmt14-de-en) [test logs](logs_test/wmt14-de-en) `max-len-a`: 0.9249639109649428, `max-len-b`: 1.4871392936978083
+* WMT16 En-Ro: [data](https://drive.google.com/file/d/1Gl-WVAglCptG7dqrA1VeK8moRlee22T7/view?usp=sharing) [model](https://drive.google.com/file/d/1VV3Mp6MgCneKgMtGAPiq0njuM7expnNV/view?usp=sharing) [val logs](logs_val/wmt16-en-ro) [test logs](logs_test/wmt16-en-ro) `max-len-a`: 0.996921062198531, `max-len-b`: 1.0282739671455445
+* WMT16 Ro-En: [data](https://drive.google.com/file/d/1lSvQ86cM_sdTruya2WCTPsQYX4PHC4wo/view?usp=sharing) (same as WMT16 En-Ro) [model](https://drive.google.com/file/d/1EixvleFCNQTceIJFt4OcgeoalSGKKEvq/view?usp=sharing) [val logs](logs_val/wmt16-ro-en) [test logs](logs_test/wmt16-ro-en) `max-len-a`: 0.9247462305812968, `max-len-b`: 1.1175631354616158
+* IWSLT14 De-En: [data](https://drive.google.com/file/d/1v7Z-23-U5WV8KhlzrepMVR0J69zH-k0R/view?usp=sharing) [model](https://drive.google.com/file/d/18K-kkSbV_NnXfxeXAjuxvrTb_zGc6r5s/view?usp=sharing) [val logs](logs_val/iwslt14-de-en) [test logs](logs_test/iwslt14-de-en) `max-len-a`: 0.941281036889224, `max-len-b`: 0.8804326732522796
 
 ## Usage
 
@@ -42,9 +42,11 @@ Before training our model, we need to preprocess the training data using `fairse
 
 ```
 DATASET=iwslt14-de-en
+SOURCE_LANG=de
+TARGET_LANG=en
 TEXT=data/$DATASET
 DATA_BIN=data-bin/$DATASET
-fairseq-preprocess --source-lang de --target-lang en \
+fairseq-preprocess --source-lang $SOURCE_LANG --target-lang $TARGET_LANG \
     --trainpref $TEXT/train --validpref $TEXT/valid --testpref $TEXT/test \
     --destdir $DATA_BIN \
     --workers 20
