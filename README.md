@@ -207,6 +207,17 @@ CUDA_VISIBLE_DEVICES=0,1,2 python train.py $DATA_BIN --arch $ARCH --share-all-em
 ```
 
 
-## Acknowledgements
 
-Our code is built on top of [fairseq](https://github.com/pytorch/fairseq) and [pytorch-strcut](https://github.com/harvardnlp/pytorch-struct).
+## Citation
+
+```
+@misc{deng2020cascaded,
+    title={Cascaded Text Generation with Markov Transformers},
+    author={Yuntian Deng and Alexander M. Rush},
+    year={2020},
+    eprint={2006.01112},
+    archivePrefix={arXiv},
+    primaryClass={cs.CL}
+}
+```
+
