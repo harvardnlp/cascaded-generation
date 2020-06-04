@@ -104,18 +104,18 @@ class TransformerModel(FairseqEncoderDecoderModel):
         self.sg_length_pred = getattr(args, "sg_length_pred", False) # TODO
         self.length_loss_factor = getattr(args, "length_loss_factor", 0.1)
         self.pred_length_offset = getattr(args, "pred_length_offset", True)
-        self.embed_length = Embedding(256, self.encoder_embed_dim, None)
+        #self.embed_length = Embedding(256, self.encoder_embed_dim, None)
 
 
     @staticmethod
     def add_args(parser):
         """Add model-specific arguments to the parser."""
-        parser.add_argument("--sg-length-pred", action="store_true",
-                            help="stop the gradients back-propagated from the length predictor")
-        parser.add_argument("--length-loss-factor", type=float,
-                            help="weights on the length prediction loss")
-        parser.add_argument("--pred-length-offset", action="store_true",
-                            help="predicting the length difference between the target and source sentences")
+        #parser.add_argument("--sg-length-pred", action="store_true",
+        #                    help="stop the gradients back-propagated from the length predictor")
+        #parser.add_argument("--length-loss-factor", type=float,
+        #                    help="weights on the length prediction loss")
+        #parser.add_argument("--pred-length-offset", action="store_true",
+        #                    help="predicting the length difference between the target and source sentences")
 
         # fmt: off
         parser.add_argument('--activation-fn',
@@ -306,74 +306,74 @@ class TransformerModel(FairseqEncoderDecoderModel):
         else:
             return decoder_out
 
-    def forward_length(self, normalize, encoder_out):
-        enc_feats = encoder_out.encoder_out  # T x B x C
-        src_masks = encoder_out.encoder_padding_mask  # B x T or None
-        enc_feats = _mean_pooling(enc_feats, src_masks)
-        if self.sg_length_pred:
-            enc_feats = enc_feats.detach()
-        length_out = F.linear(enc_feats, self.embed_length.weight)
-        return F.log_softmax(length_out, -1) if normalize else length_out
+    #def forward_length(self, normalize, encoder_out):
+    #    enc_feats = encoder_out.encoder_out  # T x B x C
+    #    src_masks = encoder_out.encoder_padding_mask  # B x T or None
+    #    enc_feats = _mean_pooling(enc_feats, src_masks)
+    #    if self.sg_length_pred:
+    #        enc_feats = enc_feats.detach()
+    #    length_out = F.linear(enc_feats, self.embed_length.weight)
+    #    return F.log_softmax(length_out, -1) if normalize else length_out
 
-    def forward_length_prediction(self, length_out, src_lengs, tgt_tokens=None, D=None, get_probs=False, threshold=None):
-        #if self.pred_length_offset:
+    #def forward_length_prediction(self, length_out, src_lengs, tgt_tokens=None, D=None, get_probs=False, threshold=None):
+    #    #if self.pred_length_offset:
 
-        length_tgt_max, length_tgt_min = None, None
-        if tgt_tokens is not None:
-            assert D is None, D
-            # obtain the length target
-            tgt_lengs = tgt_tokens.ne(self.decoder.padding_idx).sum(1).long()
-            if self.pred_length_offset:
-                length_tgt = tgt_lengs - src_lengs + 128
-            else:
-                length_tgt = tgt_lengs
-            length_tgt = length_tgt.clamp(min=0, max=255)
-            return length_tgt
-        else:
-            # predict the length target (greedy for now)
-            if D == 0:
-                pred_lengs = length_out.max(-1)[1]
-                if self.pred_length_offset:
-                    length_tgt = pred_lengs - 128 + src_lengs
-                else:
-                    length_tgt = pred_lengs
-                length_tgt_min = length_tgt
-                length_tgt_max = length_tgt
-            else:
-                pred_lengs = length_out.max(-1)[1]
-                if get_probs:
-                    assert threshold is not None
-                    log_probs, mapping = torch.sort(length_out, -1, descending=True)
-                    probs_cumsum = torch.cumsum(log_probs.exp(), dim=-1)
-                    #mapping_needed = mapping[probs_cumsum.lt(threshold)]
-                    gt_threshold = probs_cumsum.lt(threshold).long().sum(-1) + 1
-                    ids = torch.arange(0, length_out.size(-1), device=length_out.device).view(1, -1).expand(length_out.size(0), -1)
-                    mapping_min = mapping.data.clone()
-                    mapping_min.fill_(300)
-                    mapping_min[ids.lt(gt_threshold)] = mapping[ids.lt(gt_threshold)]
-                    pred_lengs_min = mapping_min.min(-1)[0]
-                    mapping_max = mapping.data.clone()
-                    mapping_max.fill_(-300)
-                    mapping_max[ids.lt(gt_threshold)] = mapping[ids.lt(gt_threshold)]
-                    pred_lengs_max = mapping_max.max(-1)[0]
-                    #D = gt_threshold.item()
-                    #log_probs, mapping = torch.topk(length_out, D+1, -1) # bsz, D
-                else:
-                    _, mapping = torch.topk(length_out, D+1, -1) # bsz, D
-                    pred_lengs_max = mapping.max(-1)[0]
-                    pred_lengs_min = mapping.min(-1)[0]
-                if self.pred_length_offset:
-                    length_tgt = pred_lengs - 128 + src_lengs
-                    length_tgt_max = pred_lengs_max - 128 + src_lengs
-                    length_tgt_min = pred_lengs_min - 128 + src_lengs
-                else:
-                    length_tgt = pred_lengs
-                    length_tgt_max = pred_lengs_max
-                    length_tgt_min = pred_lengs_min
-            if get_probs:
-                return length_tgt, length_tgt_min, length_tgt_max, log_probs
+    #    length_tgt_max, length_tgt_min = None, None
+    #    if tgt_tokens is not None:
+    #        assert D is None, D
+    #        # obtain the length target
+    #        tgt_lengs = tgt_tokens.ne(self.decoder.padding_idx).sum(1).long()
+    #        if self.pred_length_offset:
+    #            length_tgt = tgt_lengs - src_lengs + 128
+    #        else:
+    #            length_tgt = tgt_lengs
+    #        length_tgt = length_tgt.clamp(min=0, max=255)
+    #        return length_tgt
+    #    else:
+    #        # predict the length target (greedy for now)
+    #        if D == 0:
+    #            pred_lengs = length_out.max(-1)[1]
+    #            if self.pred_length_offset:
+    #                length_tgt = pred_lengs - 128 + src_lengs
+    #            else:
+    #                length_tgt = pred_lengs
+    #            length_tgt_min = length_tgt
+    #            length_tgt_max = length_tgt
+    #        else:
+    #            pred_lengs = length_out.max(-1)[1]
+    #            if get_probs:
+    #                assert threshold is not None
+    #                log_probs, mapping = torch.sort(length_out, -1, descending=True)
+    #                probs_cumsum = torch.cumsum(log_probs.exp(), dim=-1)
+    #                #mapping_needed = mapping[probs_cumsum.lt(threshold)]
+    #                gt_threshold = probs_cumsum.lt(threshold).long().sum(-1) + 1
+    #                ids = torch.arange(0, length_out.size(-1), device=length_out.device).view(1, -1).expand(length_out.size(0), -1)
+    #                mapping_min = mapping.data.clone()
+    #                mapping_min.fill_(300)
+    #                mapping_min[ids.lt(gt_threshold)] = mapping[ids.lt(gt_threshold)]
+    #                pred_lengs_min = mapping_min.min(-1)[0]
+    #                mapping_max = mapping.data.clone()
+    #                mapping_max.fill_(-300)
+    #                mapping_max[ids.lt(gt_threshold)] = mapping[ids.lt(gt_threshold)]
+    #                pred_lengs_max = mapping_max.max(-1)[0]
+    #                #D = gt_threshold.item()
+    #                #log_probs, mapping = torch.topk(length_out, D+1, -1) # bsz, D
+    #            else:
+    #                _, mapping = torch.topk(length_out, D+1, -1) # bsz, D
+    #                pred_lengs_max = mapping.max(-1)[0]
+    #                pred_lengs_min = mapping.min(-1)[0]
+    #            if self.pred_length_offset:
+    #                length_tgt = pred_lengs - 128 + src_lengs
+    #                length_tgt_max = pred_lengs_max - 128 + src_lengs
+    #                length_tgt_min = pred_lengs_min - 128 + src_lengs
+    #            else:
+    #                length_tgt = pred_lengs
+    #                length_tgt_max = pred_lengs_max
+    #                length_tgt_min = pred_lengs_min
+    #        if get_probs:
+    #            return length_tgt, length_tgt_min, length_tgt_max, log_probs
 
-            return length_tgt, length_tgt_min, length_tgt_max
+    #        return length_tgt, length_tgt_min, length_tgt_max
 
     # Since get_normalized_probs is in the Fairseq Model which is not scriptable,
     # I rewrite the get_normalized_probs from Base Class to call the

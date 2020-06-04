@@ -78,7 +78,7 @@ CUDA_VISIBLE_DEVICES=0 fairseq-train $DATA_BIN --arch $ARCH --share-decoder-inpu
     --warmup-updates $WARMUP_UPDATES --dropout $DROPOUT --weight-decay $WEIGHT_DECAY \
     --criterion label_smoothed_cross_entropy --label-smoothing 0.1 --max-tokens $MAX_TOKENS \
     --eval-bleu --eval-bleu-args '{"max_len_a": '$MAX_LEN_A', "max_len_b": '$MAX_LEN_B'}' \
-    --eval-bleu-detok moses --eval-bleu-remove-bpe --eval-bleu-print-samples \
+    --eval-tokenized-bleu --eval-bleu-remove-bpe --eval-bleu-print-samples \
     --best-checkpoint-metric bleu --maximize-best-checkpoint-metric --save-dir $SAVE_DIR \
     --max-update $MAX_UPDATES --validation-max-size 3000 \
     --validation-topk 16 --validation-D 3 --validation-rounds 5 --seed 1234 --ngrams 5
@@ -166,7 +166,7 @@ CUDA_VISIBLE_DEVICES=0,1,2 python train.py $DATA_BIN --arch $ARCH --share-all-em
     --weight-decay $WEIGHT_DECAY --max-tokens $MAX_TOKENS --save-dir $SAVE_DIR --update-freq 3 \
     --no-progress-bar --log-format json --log-interval 50 --save-interval-updates 1000 --dropout $DROPOUT\
     --fp16 --ddp-backend=no_c10d --eval-bleu --eval-bleu-args '{"max_len_a": '$MAX_LEN_A', "max_len_b": '$MAX_LEN_B'}'\
-    --eval-bleu-detok moses --eval-bleu-remove-bpe --eval-bleu-print-samples  --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
+    --eval-tokenized-bleu --eval-bleu-remove-bpe --eval-bleu-print-samples  --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
     --max-update $MAX_UPDATES  --validation-max-size 3000 --validation-topk 16 --validation-D 3 --validation-rounds 5 --seed 1234
 ```
 
@@ -208,7 +208,7 @@ CUDA_VISIBLE_DEVICES=0,1,2 python train.py $DATA_BIN --arch $ARCH --share-all-em
     --weight-decay $WEIGHT_DECAY --max-tokens $MAX_TOKENS --save-dir $SAVE_DIR --update-freq 1 \
     --no-progress-bar --log-format json --log-interval 50 --save-interval-updates 1000 --dropout $DROPOUT\
     --fp16 --ddp-backend=no_c10d --eval-bleu --eval-bleu-args '{"max_len_a": '$MAX_LEN_A', "max_len_b": '$MAX_LEN_B'}'\
-    --eval-bleu-detok moses --eval-bleu-remove-bpe --eval-bleu-print-samples --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
+    --eval-tokenized-bleu --eval-bleu-remove-bpe --eval-bleu-print-samples --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
     --max-update $MAX_UPDATES --validation-max-size 3000 --validation-topk 16 --validation-D 3 --validation-rounds 5 --seed 1234
 ```
 
