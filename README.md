@@ -13,6 +13,7 @@ Here we provide code to reproduce our results. We provide all training data and 
 pip install -qU git+https://github.com/harvardnlp/pytorch-struct
 pip install -qU git+https://github.com/harvardnlp/genbmm
 pip install -q matplotlib
+pip install -q sacremoses
 pip install --editable .
 ```
 
@@ -104,7 +105,7 @@ CUDA_VISIBLE_DEVICES=0 fairseq-generate $DATA_BIN --path $SAVE_DIR/checkpoint_be
     --max-len-a $MAX_LEN_A --max-len-b $MAX_LEN_B
 ```
 
-Note that using a model trained on a different dataset requires re-estimating `max-len-a` and `max-len-b`.
+Note that using a model trained on a different dataset requires re-estimating `max-len-a` and `max-len-b`. Also, we provide another version of max-marginal computation using CUDA kernels based on [tvm](https://github.com/apache/incubator-tvm), which might be slightly faster depending on platform. To use it, install tvm first, then add `--usetvm` to the above command.
 
 ### Multi-GPU Generation:
 

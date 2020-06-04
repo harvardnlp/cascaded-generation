@@ -52,7 +52,8 @@ def max_marginals(scores):
         suffix_new[:, 1::2] = suffix
         prefix = prefix_new
         suffix = suffix_new
-    return (prefix.max(-2, keepdim=True)[0] + scores.transpose(-2, -1) + suffix.max(-1, keepdim=True)[0])[:, :N_orig]
+    return (prefix.max(-2, keepdim=True)[0].transpose(-2, -1) + scores + suffix.max(-1, keepdim=True)[0].transpose(-2,-1))[:, :N_orig]
+
 class SequenceGenerator(object):
     def __init__(
         self,
@@ -632,13 +633,13 @@ class SequenceGenerator(object):
                 if order != len(beam_sizes)-1:
                     if rank < ngpus_use:
                         if self.usetvm:
-                           if ngram_probs.size(-1) not in fbs:
-                               import importlib.util
-                               spec = importlib.util.spec_from_file_location("get_fb", "genbmm/opt/hmm.py")
-                               foo = importlib.util.module_from_spec(spec)
-                               spec.loader.exec_module(foo)
-                               fbs[ngram_probs.size(-1)] = foo.fb_max(ngram_probs.size(-1))
-                           fb = fbs[ngram_probs.size(-1)]
+                            if ngram_probs.size(-1) not in fbs:
+                                import importlib.util
+                                spec = importlib.util.spec_from_file_location("get_fb", "genbmm/opt/hmm.py")
+                                foo = importlib.util.module_from_spec(spec)
+                                spec.loader.exec_module(foo)
+                                fbs[ngram_probs.size(-1)] = foo.fb_max(ngram_probs.size(-1))
+                            fb = fbs[ngram_probs.size(-1)]
                         if self.cscore == -9:
                             dis = torch_struct.LinearChainCRF(ngram_probs.transpose(-1,-2))
                             counts = dis.count
@@ -650,7 +651,7 @@ class SequenceGenerator(object):
                                 edge_marginals = edge_max_marginals.transpose(0, 1).contiguous() # bsz, length-1, K, K
                             else:
                                 edge_max_marginals = max_marginals(ngram_probs)
-                                edge_marginals = edge_max_marginals.contiguous().transpose(-1, -2).contiguous()
+                                edge_marginals = edge_max_marginals.contiguous()
 
                             if self.cscore == -9:
                                 tmp = ngram_probs.data.clone()
