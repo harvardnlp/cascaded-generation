@@ -17,7 +17,7 @@ pip install -q sacremoses
 pip install --editable .
 ```
 
-## Datasets & Pretrained Models
+## Datasets & Pretrained Models & Logs
 
 We only include `IWSLT14 De-En` in this repository. Other datasets/models can be found at [this link](https://drive.google.com/drive/folders/1G5Vl150cPyc5EWxxqRdngwUifccQeccN?usp=sharing). Data, models, validation and test logs for individual datasets can be found at links below.
 
