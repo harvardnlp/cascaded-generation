@@ -7,6 +7,8 @@ Here we provide code to reproduce our results. We provide all training data and 
 
 ## Prerequisites
 
+* [Pytorch](https://pytorch.org/get-started/locally/)
+
 ```
 pip install -qU git+https://github.com/harvardnlp/pytorch-struct
 pip install -qU git+https://github.com/harvardnlp/genbmm

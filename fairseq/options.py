@@ -529,12 +529,10 @@ def add_generation_args(parser):
                        help='beam size')
     group.add_argument('--rounds', default=5, type=int, metavar='N',
                        help='beam size')
-    group.add_argument('--timesx', default=1, type=int, metavar='N',
-                       help='beam size')
     group.add_argument('--max-size', default=0, type=int, metavar='N',
                        help='beam size')
-    group.add_argument('--usenew', default=0, type=int, metavar='N',
-                       help='beam size')
+    group.add_argument('--usetvm', default=False, action='store_true',
+                       help=('kernel version max-marginals using tvm'))
     group.add_argument('--usemarginals', default=0, type=int, metavar='N',
                        help='use marginals instead of max marginals')
     group.add_argument('--cscore', default=0, type=int, metavar='N',

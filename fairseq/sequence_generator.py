@@ -7,57 +7,52 @@ import math
 
 import torch
 import torch.nn as nn
-from torch.cuda._utils import _get_device_index
+#from torch.cuda._utils import _get_device_index
 import torch_struct
 from fairseq import search, utils
 from fairseq.data import data_utils
 from fairseq.models import FairseqIncrementalDecoder
 
-import importlib.util
-spec = importlib.util.spec_from_file_location("get_fb", "genbmm/opt/hmm.py")
-foo = importlib.util.module_from_spec(spec)
-import torch.cuda
-#torch.cuda.synchronize()
-spec.loader.exec_module(foo)
 fbs = {}
 total_num_valid = [0. for _ in range(5)]
 total_num_total = [0. for _ in range(5)]
 import collections
 import time
+import genbmm
 time_spent = collections.defaultdict(float)
+
 def max_marginals(scores):
     N_orig = scores.size(1)
     l = math.log(N_orig, 2)
     l = int(math.ceil(l))
     N = 2 ** l
-    scores_new = scores.new(scores.size(0), N, scores.size(2), scores.size(3)).fill_(0)
-    scores_new[:, :N_orig] = scores
-    scores = scores_new
+    if N != N_orig:
+        scores_new = scores.new(scores.size(0), N, scores.size(2), scores.size(3)).fill_(0)
+        scores_new[:, :N_orig] = scores
+        scores = scores_new
     B, N, C, C = scores.shape
     def combine(a, b):
         return genbmm.maxbmm(a.view(-1, C, C).contiguous(),
                              b.view(-1, C, C).contiguous()).view(B, -1, C, C)
     N_sq = int(math.log(N, 2))
     chart = scores
-    charts = []
-    charts.append(chart)
+    charts = [chart,]
     for i in range(1, N_sq+1):
         chart = combine(chart[:, ::2], chart[:, 1::2])
         charts.append(chart)
-    P, S = 0, 1
-    ps = torch.zeros(2, B, 1, C, C).cuda()
+    prefix = torch.zeros(B, 1, C, C, device=scores.device)
+    suffix = torch.zeros(B, 1, C, C, device=scores.device)
     for i in range(N_sq-1, -1, -1):
-        ps2 = torch.zeros(2, B, int(2**(N_sq-i)), C, C).cuda()
-        ps2[P, :, ::2] = ps[P, :, :]
-        ps2[P, :, 1::2] = combine(ps[P, :, :], charts[i][:, ::2])
+        prefix_new = torch.zeros(B, int(2**(N_sq-i)), C, C, device=scores.device)
+        suffix_new = torch.zeros(B, int(2**(N_sq-i)), C, C, device=scores.device)
+        prefix_new[:, ::2] = prefix[:, :]
+        prefix_new[:, 1::2] = combine(prefix, charts[i][:, ::2])
         
-        ps2[S, :, ::2] = combine(charts[i][:, 1::2], ps[S, :, :])
-        ps2[S, :, 1::2] = ps[S, :, :]
-        ps = ps2
-    suffix = ps[S, :, :]
-    prefix = ps[P, :, :] 
+        suffix_new[:, ::2] = combine(charts[i][:, 1::2], suffix)
+        suffix_new[:, 1::2] = suffix
+        prefix = prefix_new
+        suffix = suffix_new
     return (prefix.max(-2, keepdim=True)[0] + scores.transpose(-2, -1) + suffix.max(-1, keepdim=True)[0])[:, :N_orig]
-
 class SequenceGenerator(object):
     def __init__(
         self,
@@ -74,10 +69,9 @@ class SequenceGenerator(object):
         match_source_len=False,
         no_repeat_ngram_size=0,
         search_strategy=None,
-        timesx=1,
         cscore=None,
         nominlen=None,
-        usenew=0,
+        usetvm=False,
         usemarginals=0,
         ngpus=None,
         eos=None
@@ -105,13 +99,10 @@ class SequenceGenerator(object):
             match_source_len (bool, optional): outputs should match the source
                 length (default: False)
         """
-        if usenew:
-            import genbmm
         self.nominlen = nominlen
         self.usemarginals = usemarginals
-        self.usenew = usenew
+        self.usetvm = usetvm
         self.ngpus = ngpus
-        self.timesx = timesx
         self.pad = tgt_dict.pad()
         self.unk = tgt_dict.unk()
         self.eos = tgt_dict.eos() if eos is None else eos
@@ -321,7 +312,7 @@ class SequenceGenerator(object):
                 offset_end = offset_start + chunk_sizes[rank]
                 offset_length = chunk_sizes[rank]
             if order == 0:
-                beam_size = beam_size * self.timesx
+                beam_size = beam_size
                 #beam_size = 64
                 if rank < ngpus_use:
                     prev_output_tokens = src_tokens.new(bsz*offset_length, 1).fill_(0)
@@ -638,12 +629,14 @@ class SequenceGenerator(object):
                         ngram_probs_gathered = torch.cat(g_list_out, 1) # bsz, L, K, K
                         ngram_probs = ngram_probs_gathered
 
-                #if self.beam_size == 99 and len(all_tokens)==2:
-                #    import pdb; pdb.set_trace()
                 if order != len(beam_sizes)-1:
                     if rank < ngpus_use:
-                        if self.usenew == 0:
+                        if self.usetvm:
                            if ngram_probs.size(-1) not in fbs:
+                               import importlib.util
+                               spec = importlib.util.spec_from_file_location("get_fb", "genbmm/opt/hmm.py")
+                               foo = importlib.util.module_from_spec(spec)
+                               spec.loader.exec_module(foo)
                                fbs[ngram_probs.size(-1)] = foo.fb_max(ngram_probs.size(-1))
                            fb = fbs[ngram_probs.size(-1)]
                         if self.cscore == -9:
@@ -652,7 +645,7 @@ class SequenceGenerator(object):
                             print (f'count order {order} ', counts)
                         with torch.no_grad():
                             marginal_time_start = time.time()
-                            if self.usenew == 0:
+                            if self.usetvm:
                                 edge_max_marginals = fb(ngram_probs.transpose(0, 1).contiguous()) # bsz, length-1, K, K
                                 edge_marginals = edge_max_marginals.transpose(0, 1).contiguous() # bsz, length-1, K, K
                             else:
