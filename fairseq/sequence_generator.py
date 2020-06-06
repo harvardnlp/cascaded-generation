@@ -210,9 +210,6 @@ class SequenceGenerator(object):
         #assert self.max_len_b == 0
         #beam_len = self.tokens.view(-1).size(0)
 
-        ngpus_use = ngpus
-        if rank < ngpus_use:
-            encoder_outs = model.forward_encoder(encoder_input, clear_decoder=True)
             #import pdb; pdb.set_trace()
             #normalize = True
             ##try:
@@ -236,9 +233,10 @@ class SequenceGenerator(object):
 
         #target_lengths = target_lengths_orig + 1
 
-        max_len = int(math.floor(100 * 128 / topk))
-        #print (f'count order L ', target_lengths.max() * topk)
-        target_lengths = target_lengths.clamp(max=max_len)
+        if topk >= 128:
+            max_len = int(math.floor(100 * 128 / topk))
+            #print (f'count order L ', target_lengths.max() * topk)
+            target_lengths = target_lengths.clamp(max=max_len)
         length = target_lengths.max().item()
 
         if D > 0:
@@ -268,8 +266,9 @@ class SequenceGenerator(object):
         #    print(probs.exp())
         #    print(torch.cumsum(probs.exp().view(-1), 0))
         ngpus_use = min(length, ngpus)
-        #print ('length', length)
         encoder_time_start = time.time()
+        if rank < ngpus_use:
+            encoder_outs = model.forward_encoder(encoder_input, clear_decoder=True)
 
 
         encoder_time = time.time() - encoder_time_start
@@ -314,7 +313,6 @@ class SequenceGenerator(object):
                 offset_length = chunk_sizes[rank]
             if order == 0:
                 beam_size = beam_size
-                #beam_size = 64
                 if rank < ngpus_use:
                     prev_output_tokens = src_tokens.new(bsz*offset_length, 1).fill_(0)
                     position = torch.arange(offset_start, offset_end).view(1, -1).repeat(bsz, 1) + 2
@@ -381,8 +379,6 @@ class SequenceGenerator(object):
                 else:
                     if rank < ngpus_use:
                         scores, mapping = torch.topk(unigram_probs, beam_size, -1) # bsz, L, K
-                        #if id == 949:
-                        #    import pdb; pdb.set_trace()
                     if ngpus > 1:
                         g_list = []
                         for r in range(0, ngpus):
@@ -524,7 +520,7 @@ class SequenceGenerator(object):
                     if (ngpus_use == prev_ngpus_use) and (rank == (ngpus_use-1)):
                         ngram_probs = ngram_probs[:, :-1]
                     assert ngram_probs.size(1) == offset_length, (ngram_probs.size(1), offset_length)
-                    #ids = torch.arange(offset_start, offset_end).view(1, -1).expand(bsz, -1).to(device)
+                    ids = torch.arange(offset_start, offset_end).view(1, -1).expand(bsz, -1).to(device)
                     #if D == 0:
                     #    ngram_probs[ids.ge(target_lengths.view(-1, 1)-1-order)] = -float('inf')
                     #    ngram_probs[:, :, :, 2][ids.ge(target_lengths.view(-1, 1)-1-order)] = 0
@@ -544,11 +540,7 @@ class SequenceGenerator(object):
 
                     next_words = next_words[:, offset_start:offset_end]
                     next_words = next_words.unsqueeze(-2).expand(-1, -1, prev_beam_sizes[-1], -1) # bsz, L-1, K, K
-                    # TODO:
-                    #if debug_flag:
-                    #    ngram_probs_orig = ngram_probs
                     next_scores = ngram_probs.gather(-1, next_words) # bsz, L-1, K, K
-                    ids = torch.arange(offset_start, offset_end).view(1, -1).expand(bsz, -1).to(device) # bsz, l
                     if D == 0:
                         #mask = ids.gt(target_lengths.view(-1, 1)-1-order)
                         #next_scores[mask] = -float('inf')
@@ -580,6 +572,7 @@ class SequenceGenerator(object):
                             last_words = prev_output_tokens[:, -1].contiguous().view(bsz, offset_length, -1) # bsz, length-order, K
                         mask_pad = last_words.eq(1)
                         next_scores[mask_pad] = -float('inf') # pad to nothing
+                        assert self.len_penalty == 0
                         gamma = self.len_penalty
                         #gamma = -0.5
                         next_scores[mask_pad.unsqueeze(-1) & next_words.eq(1)] = gamma # pad to pad

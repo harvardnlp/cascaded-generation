@@ -3,7 +3,7 @@
 
 ![](cascaded-generation-fastest.gif)
 
-Here we provide code to reproduce our results. We provide all training data and training scripts, as well as all pretrained models used in our paper. Our code is built on top of [fairseq](https://github.com/pytorch/fairseq) and [pytorch-struct](https://github.com/harvardnlp/pytorch-struct).
+Here we provide code to reproduce our results. We provide all training data and training scripts, as well as all pretrained models used in our paper with generation logs. Our code is built on top of [fairseq](https://github.com/pytorch/fairseq) and [pytorch-struct](https://github.com/harvardnlp/pytorch-struct).
 
 ## Prerequisites
 
