@@ -1,0 +1,46 @@
+==================================================Unigram Constraints (Iteration 1)==================================================
+0: again  & i  & repe@@  & again  & </s>  & </s>  & </s>  & </s>  & </s>  & </s>  & </s>  & <pad>
+1: i  & &apos;ll  & again  & repe@@  & again  & <pad>  & <pad>  & <pad>  & <pad>  & <pad>  & <pad>  & </s>
+2: so  & again  & i  & that  & repe@@  & again  & again  & .  & .  & .  & .  & ,
+3: let  & me  & &apos;ll  & the  & .  & .  & .  & again  & again  & again  & again  & and
+4: and  & repe@@  & do  & this  & that  & repe@@  & repe@@  & this  & this  & repe@@  & repe@@  & to
+5: now  & ,  & &apos;s  & it  & the  & the  & this  & it  & it  & this  & it  & <s>
+6: here  & &apos;s  & the  & over  & this  & this  & it  & repe@@  & repe@@  & it  & this  & <unk>
+7: well  & &apos;m  & just  & .  & it  & that  & that  & that  & ?  & ?  & ?  & the
+8: repe@@  & let  & me  & i  & over  & it  & the  & ?  & that  & that  & that  & of
+9: just  & just  & ,  & do  & i  & over  & time  & time  & time  & here  & here  & .
+==================================================Bigram Constraints (Iteration 2)==================================================
+0: again ,  & , again  & again .  & . </s>  & </s> <pad>  & <pad> <pad>  & <pad> <pad>  & <pad> <pad>  & <pad> <pad>  & <pad> <pad>  & <pad> <pad>
+1: so again  & again ,  & , again  & again .  & . </s>  & </s> <pad>  & </s> <pad>  & </s> <pad>  & </s> <pad>  & </s> <pad>  & </s> <pad>
+2: and again  & &apos;ll do  & do that  & that again  & again .  & . </s>  & . </s>  & . </s>  & . </s>  & . </s>  & </s> </s>
+3: so ,  & me do  & do it  & it again  & that again  & again .  & again .  & again .  & again .  & ? </s>  & </s> ,
+4: now again  & , i  & i do  & do that  & it again  & it again  & this again  & it again  & ? </s>  & . <pad>  & </s> the
+5: now ,  & &apos;ll again  & do this  & this again  & this again  & this again  & time .  & time .  & again ?  & again </s>  & </s> of
+6: i &apos;ll  & &apos;s again  & i again  & do it  & that .  & over again  & that again  & this again  & that .  & here </s>  & </s> <unk>
+7: let me  & i do  & , this  & do this  & over again  & that again  & it again  & ? </s>  & time .  & again <pad>  & </s> <s>
+8: well ,  & let me  & again this  & i again  & this .  & again </s>  & this .  & that .  & this .  & this </s>  & </s> and
+9: well again  & me again  & me do  & over again  & it .  & over .  & that .  & that again  & again </s>  & it </s>  & </s> to
+==================================================Trigram Constraints (Iteration 3)==================================================
+0: so , again  & , again .  & again . </s>  & . </s> <pad>  & </s> <pad> <pad>  & <pad> <pad> <pad>  & <pad> <pad> <pad>  & <pad> <pad> <pad>  & <pad> <pad> <pad>  & <pad> <pad> <pad>
+1: again , again  & again , again  & , again .  & again . </s>  & . </s> <pad>  & </s> <pad> <pad>  & </s> <pad> <pad>  & </s> <pad> <pad>  & . </s> <pad>  & . </s> <pad>
+2: so again ,  & me do that  & do that again  & that again .  & again . </s>  & . </s> <pad>  & . </s> <pad>  & . </s> <pad>  & again . <pad>  & . <pad> <pad>
+3: now , again  & &apos;ll do that  & do it again  & it again .  & that again .  & again . </s>  & again . </s>  & again . </s>  & that . </s>  & again <pad> <pad>
+4: let me do  & &apos;ll do it  & do this again  & this again .  & it again .  & again </s> <pad>  & that . </s>  & this again .  & that . <pad>  & this </s> <pad>
+5: well , again  & me do this  & i do that  & do that again  & this again .  & that again .  & that again .  & this again ?  & </s> <pad> <pad>  & </s> <pad> <pad>
+6: i &apos;ll do  & me do it  & i do it  & do it again  & that . </s>  & over . </s>  & this . </s>  & time . </s>  & again . </s>  & ? </s> <pad>
+7: again , i  & , i do  & i again .  & do this again  & this . </s>  & over again .  & it again .  & it again </s>  & again ? </s>  & here </s> <pad>
+8: and again ,  & &apos;ll do this  & , this again  & do that .  & it . </s>  & it again .  & this again .  & it again .  & time . </s>  & it </s> <pad>
+9: i &apos;ll again  & , i again  & i do this  & do this .  & that again </s>  & this again .  & time . </s>  & it again ?  & ? </s> <pad>  & again </s> <pad>
+==================================================4gram Constraints (Iteration 4)==================================================
+0: so , again .  & , again . </s>  & again . </s> <pad>  & . </s> <pad> <pad>  & </s> <pad> <pad> <pad>  & <pad> <pad> <pad> <pad>  & <pad> <pad> <pad> <pad>  & <pad> <pad> <pad> <pad>  & <pad> <pad> <pad> <pad>
+1: again , again .  & again , again .  & , again . </s>  & again . </s> <pad>  & . </s> <pad> <pad>  & </s> <pad> <pad> <pad>  & </s> <pad> <pad> <pad>  & </s> <pad> <pad> <pad>  & again . <pad> <pad>
+2: so again , again  & me do that again  & do that again .  & that again . </s>  & again . </s> <pad>  & . </s> <pad> <pad>  & . </s> <pad> <pad>  & . </s> <pad> <pad>  & that . <pad> <pad>
+3: now , again .  & , i do that  & i do that again  & do that again .  & that again . </s>  & again . </s> <pad>  & again . </s> <pad>  & again . </s> <pad>  & again ? </s> <pad>
+4: let me do that  & &apos;ll do that again  & do it again .  & it again . </s>  & it again . </s>  & again </s> <pad> <pad>  & time . </s> <pad>  & it again . <pad>  & time . </s> <pad>
+5: again , i do  & &apos;ll do it again  & i do it again  & do it again .  & this again . </s>  & it again . </s>  & this . </s> <pad>  & it again . </s>  & . </s> <pad> <pad>
+6: i &apos;ll do that  & me do it again  & do this again .  & this again . </s>  & that . </s> <pad>  & this again . </s>  & this again . </s>  & time . </s> <pad>  & that . </s> <pad>
+7: well , again .  & , i do it  & i do this again  & do this again .  & this . </s> <pad>  & over again . </s>  & it again . </s>  & this again ? </s>  & again . </s> <pad>
+8: i &apos;ll do it  & me do this again  & i again . </s>  & do that . </s>  & that again </s> <pad>  & that again . </s>  & that . </s> <pad>  & this again . <pad>  & ? </s> <pad> <pad>
+9: let me do it  & , i do this  & i do that .  & do this . </s>  & it . </s> <pad>  & over . </s> <pad>  & that again . </s>  & this again . </s>  & </s> <pad> <pad> <pad>
+==================================================5gram Viterbi Result (Iteration 5)==================================================
+0: so , again . </s> <pad> <pad> <pad> <pad> <pad> <pad> <pad>

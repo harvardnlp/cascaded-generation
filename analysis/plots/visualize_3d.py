@@ -5,6 +5,8 @@ import argparse
 import copy
 import tqdm
 
+import fairseq
+
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation

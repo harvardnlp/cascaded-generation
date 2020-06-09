@@ -1,0 +1,46 @@
+==================================================Unigram Constraints (Iteration 1)==================================================
+0: the  & first  & number  & is  & three  & three  & three  & </s>  & </s>  & </s>  & </s>  & </s>  & </s>  & </s>  & <pad>
+1: and  & the  & is  & number  & is  & :  & billion  & billion  & <pad>  & <pad>  & <pad>  & <pad>  & <pad>  & <pad>  & </s>
+2: first  & number  & first  & three  & :  & 3  & 3  & people  & people  & .  & .  & .  & .  & .  & ,
+3: so  & very  & numbers  & first  & 3  & billion  & :  & three  & .  & people  & people  & people  & people  & people  & and
+4: that  & one  & one  & of  & ,  & ,  & people  & million  & billion  & billion  & humans  & humans  & ?  & ?  & to
+5: now  & &apos;s  & set  & one  & that  & is  & million  & .  & three  & three  & three  & ?  & three  & three  & <s>
+6: one  & ,  & figure  & that  & three-@@  & three-@@  & ,  & 3  & million  & humans  & billion  & three  & humans  & humans  & <unk>
+7: well  & original  & of  & numbers  & two  & that  & three-@@  & humans  & humans  & million  & the  & the  & &quot;  & &quot;  & the
+8: then  & ini@@  & three  & ,  & number  & it  & two  & :  & of  & the  & human  & billion  & the  & number  & of
+9: number  & is  & population  & two  & this  & this  & is  & ,  & are  & of  & of  & &quot;  & there  & there  & .
+==================================================Bigram Constraints (Iteration 2)==================================================
+0: the first  & first number  & number is  & is three  & three :  & : three  & three billion  & billion people  & people .  & . </s>  & </s> <pad>  & <pad> <pad>  & <pad> <pad>  & <pad> <pad>
+1: and the  & the first  & first number  & number is  & is three  & three billion  & billion people  & people .  & . </s>  & </s> <pad>  & <pad> <pad>  & </s> <pad>  & . </s>  & </s> <pad>
+2: so the  & number one  & number one  & one is  & three billion  & billion people  & people .  & . </s>  & </s> <pad>  & <pad> <pad>  & . </s>  & people .  & </s> <pad>  & </s> </s>
+3: first number  & first one  & number three  & three :  & three ,  & , three  & 3 billion  & billion humans  & humans .  & people .  & billion people  & . </s>  & ? </s>  & </s> ,
+4: that first  & number is  & one is  & number three  & : three  & : 3  & three-@@ billion  & billion .  & billion people  & three billion  & people .  & billion .  & &quot; </s>  & </s> the
+5: now the  & first figure  & number number  & two :  & three is  & is three  & three million  & million people  & people </s>  & . .  & of people  & humans .  & people </s>  & </s> of
+6: the very  & first numbers  & is three  & is 3  & 3 billion  & : three-@@  & two billion  & billion billion  & of people  & billion people  & humans .  & &quot; </s>  & . <pad>  & </s> <unk>
+7: the number  & first set  & figure is  & , three  & three-@@ billion  & that three  & billion humans  & humans .  & are three  & of people  & billion .  & people ?  & people <pad>  & </s> <s>
+8: then the  & number number  & one number  & two is  & number three  & : two  & : three  & billion of  & million people  & million people  & three billion  & . &quot;  & humans </s>  & </s> and
+9: and first  & first population  & number two  & three is  & , three  & 3 billion  & three people  & three billion  & three billion  & humans .  & of humans  & people </s>  & there </s>  & </s> to
+==================================================Trigram Constraints (Iteration 3)==================================================
+0: the first number  & first number is  & number is three  & is three :  & three : three  & : three billion  & three billion people  & billion people .  & people . </s>  & . </s> <pad>  & </s> <pad> <pad>  & <pad> <pad> <pad>  & <pad> <pad> <pad>
+1: and the first  & the first number  & first number is  & is three billion  & three billion people  & billion people .  & people . </s>  & . </s> <pad>  & </s> <pad> <pad>  & <pad> <pad> <pad>  & <pad> <pad> <pad>  & </s> <pad> <pad>  & </s> <pad> <pad>
+2: first number is  & number is three  & is three :  & number is three  & is three billion  & three billion people  & billion people .  & people . </s>  & . </s> <pad>  & </s> <pad> <pad>  & . </s> <pad>  & people . </s>  & &quot; </s> <pad>
+3: so the first  & first number three  & number three :  & three : three  & : three billion  & , three billion  & three billion humans  & billion humans .  & humans . </s>  & people . </s>  & billion people .  & people . <pad>  & people <pad> <pad>
+4: the first one  & first one is  & one is three  & is three ,  & three , three  & : 3 billion  & 3 billion people  & million people .  & billion people .  & . . </s>  & of people ?  & humans . <pad>  & humans </s> <pad>
+5: the first figure  & first number one  & number one is  & one is three  & three : 3  & : three million  & three million people  & billion billion people  & of people .  & of people .  & people . </s>  & &quot; </s> <pad>  & . </s> <pad>
+6: that first number  & first figure is  & figure is three  & three is three  & 3 billion people  & is three billion  & three-@@ billion people  & billion . </s>  & people </s> <pad>  & million people .  & of people .  & humans . </s>  & ? </s> <pad>
+7: now the first  & first number two  & number three is  & is 3 billion  & three is three  & : three-@@ billion  & three billion billion  & humans . </s>  & people . .  & billion people .  & people . &quot;  & billion . <pad>  & . <pad> <pad>
+8: then the first  & first number number  & number is 3  & two is three  & three : three-@@  & three billion humans  & three billion .  & billion of people  & humans . .  & three billion people  & billion people ?  & . </s> <pad>  & there </s> <pad>
+9: the number one  & number one is  & number two is  & is three is  & three : two  & : two billion  & billion humans .  & billion people </s>  & are three billion  & three billion .  & billion people </s>  & billion . </s>  & people </s> <pad>
+==================================================4gram Constraints (Iteration 4)==================================================
+0: the first number is  & first number is three  & number is three :  & is three : three  & three : three billion  & : three billion people  & three billion people .  & billion people . </s>  & people . </s> <pad>  & . </s> <pad> <pad>  & </s> <pad> <pad> <pad>  & <pad> <pad> <pad> <pad>
+1: and the first number  & the first number is  & number is three billion  & is three billion people  & three billion people .  & billion people . </s>  & people . </s> <pad>  & . </s> <pad> <pad>  & </s> <pad> <pad> <pad>  & <pad> <pad> <pad> <pad>  & <pad> <pad> <pad> <pad>  & </s> <pad> <pad> <pad>
+2: first number is three  & number is three :  & first number is three  & number is three billion  & is three billion people  & three billion people .  & billion people . </s>  & people . </s> <pad>  & . </s> <pad> <pad>  & </s> <pad> <pad> <pad>  & . </s> <pad> <pad>  & people . </s> <pad>
+3: so the first number  & first number three :  & is three : three  & three : three billion  & : three billion people  & , three billion people  & three billion humans .  & billion humans . </s>  & humans . </s> <pad>  & people . </s> <pad>  & billion people . </s>  & people . <pad> <pad>
+4: the first number three  & first one is three  & number is three ,  & is three , three  & three , three billion  & : three billion humans  & 3 billion people .  & million people . </s>  & billion people . </s>  & . . </s> <pad>  & people . </s> <pad>  & . </s> <pad> <pad>
+5: the first one is  & first number one is  & number three : three  & is three : 3  & three : 3 billion  & : 3 billion people  & three million people .  & billion billion people .  & people </s> <pad> <pad>  & of people . </s>  & of people . </s>  & billion . </s> <pad>
+6: the first number one  & first figure is three  & one is three :  & one is three billion  & three : three million  & : three million people  & three-@@ billion people .  & billion . </s> <pad>  & people . . </s>  & three billion people .  & billion people . <pad>  & billion . <pad> <pad>
+7: the first figure is  & first number three is  & number one is three  & three is three billion  & 3 billion people .  & : three-@@ billion people  & three billion billion people  & humans . </s> <pad>  & humans . . </s>  & billion people . </s>  & of people . <pad>  & humans . </s> <pad>
+8: that first number is  & first number is 3  & figure is three :  & is 3 billion people  & three : three-@@ billion  & is three billion people  & three billion . </s>  & billion people </s> <pad>  & of people . </s>  & million people . </s>  & </s> <pad> <pad> <pad>  & humans . <pad> <pad>
+9: the first number two  & first number two is  & number three is three  & two is three billion  & three is three billion  & : three billion billion  & billion humans . </s>  & billion people . .  & are three billion people  & of people . &quot;  & </s> <pad> <pad> </s>  & &quot; </s> <pad> <pad>
+==================================================5gram Viterbi Result (Iteration 5)==================================================
+0: the first number is three : three billion people . </s> <pad> <pad> <pad> <pad>
