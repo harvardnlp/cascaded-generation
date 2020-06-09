@@ -161,6 +161,12 @@ Next, we can use the following command to generate the images and animations:
 python analysis/plots/visualize_3d.py --dump-vis-path analysis/data/dump_iwslt14_de_en_val_max10_topk10.pt --output-dir analysis/visualizations
 ```
 
+We can also use the below command to print out constraint sets during decoding:
+
+```
+python analysis/plots/print_constraints.py --dump-vis-path analysis/data/dump_iwslt14_de_en_val_max10_topk10.pt --output-dir analysis/visualizations
+```
+
 ### Training on Other Datasets
 
 #### WMT14 (raw/distilled) En-De/De-En
