@@ -125,6 +125,41 @@ CUDA_VISIBLE_DEVICES=0,1,2 fairseq-generate $DATA_BIN --path $SAVE_DIR/checkpoin
     --max-len-a $MAX_LEN_A --max-len-b $MAX_LEN_B
 ```
 
+### Visualizations
+
+More visualizations can be found at [analysis/visualizations](analysis/visualizations). To draw these plots (Figure 1, Figure 4 and Figure 5 in the paper), we need more dependencies.
+
+```
+pip install -qU git+https://github.com/da03/matplotlib.git
+pip install -q mplot3d-dragger
+pip install -q tqdm
+apt install imagemagick
+```
+
+In particular, we need to use a slightly modified version of matplotlib to remove the hard-coded padding for axes.
+
+First, we need to dump the data for visualization purposes by running the generation command with `--dump-vis-path dump_vis_path` (here we use 10 examples from IWSLT14 De-En validation set and `topk=10`):
+
+```
+DATASET=iwslt14-de-en
+DATA_BIN=data-bin/$DATASET
+SAVE_DIR=checkpoints/$DATASET
+BATCH_SIZE=1
+TOPK=10
+rounds=5
+MAX_LEN_A=0.941281036889224
+MAX_LEN_B=0.8804326732522796
+CUDA_VISIBLE_DEVICES=0 fairseq-generate $DATA_BIN --path $SAVE_DIR/checkpoint_best.pt \
+    --batch-size $BATCH_SIZE --topk $TOPK --remove-bpe --D 3 --rounds $rounds \
+    --max-len-a $MAX_LEN_A --max-len-b $MAX_LEN_B \
+    --gen-subset valid --max-size 10 --seed 1234 --dump-vis-path analysis/data/dump_iwslt14_de_en_val_max10_topk10.pt
+```
+
+Next, we can use the following command to generate the images and animations:
+
+```
+python analysis/plots/visualize_3d.py --dump-vis-path analysis/data/dump_iwslt14_de_en_val_max10_topk10.pt --output-dir analysis/visualizations
+```
 
 ### Training on Other Datasets
 

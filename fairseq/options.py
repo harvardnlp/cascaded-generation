@@ -531,6 +531,8 @@ def add_generation_args(parser):
                        help='beam size')
     group.add_argument('--max-size', default=0, type=int, metavar='N',
                        help='beam size')
+    group.add_argument('--dump-vis-path', default='', type=str,
+                       help=('Dump data for visualization purposes'))
     group.add_argument('--usetvm', default=False, action='store_true',
                        help=('kernel version max-marginals using tvm'))
     group.add_argument('--usemarginals', default=0, type=int, metavar='N',

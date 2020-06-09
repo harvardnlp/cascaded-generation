@@ -310,6 +310,7 @@ class FairseqTask(object):
             ngpus=getattr(args, "ngpus", 1),
             cscore=getattr(args, "cscore", None),
             nominlen=getattr(args, "nominlen", None),
+            dump_vis_path=getattr(args, "dump_vis_path", False),
             usetvm=getattr(args, "usetvm", False),
             usemarginals=getattr(args, "usemarginals", 0),
         )

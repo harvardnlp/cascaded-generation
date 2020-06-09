@@ -283,6 +283,10 @@ def _main(args, output_file, rank=0, world_size=1, backend='NCCL', master_addr='
                 num_sentences += sample['nsentences']
 
         if rank == 0:
+            import pickle
+            if args.dump_vis_path != '':
+                pickle.dump(generator.data, open(args.dump_vis_path, 'wb'))
+                logger.info(f'Data dumped to {args.dump_vis_path}')
             logger.info('NOTE: hypothesis and token scores are output in base 2')
             logger.info('Translated {} sentences ({} tokens) in {:.1f}s ({:.2f} sentences/s, {:.2f} tokens/s)'.format(
                 num_sentences, gen_timer.n, gen_timer.sum, num_sentences / gen_timer.sum, 1. / gen_timer.avg))

@@ -21,7 +21,7 @@ import time
 import genbmm
 time_spent = collections.defaultdict(float)
 
-def max_marginals(scores):
+def max_marginals(scores, get_all=False):
     N_orig = scores.size(1)
     l = math.log(N_orig, 2)
     l = int(math.ceil(l))
@@ -52,7 +52,10 @@ def max_marginals(scores):
         suffix_new[:, 1::2] = suffix
         prefix = prefix_new
         suffix = suffix_new
-    return (prefix.max(-2, keepdim=True)[0].transpose(-2, -1) + scores + suffix.max(-1, keepdim=True)[0].transpose(-2,-1))[:, :N_orig]
+    if get_all:
+        return (prefix.max(-2, keepdim=True)[0].transpose(-2, -1) + scores + suffix.max(-1, keepdim=True)[0].transpose(-2, -1))[:, :N_orig], (prefix.max(-2, keepdim=True)[0]).transpose(-2, -1)[:, :N_orig], scores[:, :N_orig], (suffix.max(-1, keepdim=True)[0].transpose(-2, -1))[:, :N_orig]
+    else:
+        return (prefix.max(-2, keepdim=True)[0].transpose(-2, -1) + scores + suffix.max(-1, keepdim=True)[0].transpose(-2, -1))[:, :N_orig]
 
 class SequenceGenerator(object):
     def __init__(
@@ -73,6 +76,7 @@ class SequenceGenerator(object):
         cscore=None,
         nominlen=None,
         usetvm=False,
+        dump_vis_path='',
         usemarginals=0,
         ngpus=None,
         eos=None
@@ -103,6 +107,7 @@ class SequenceGenerator(object):
         self.nominlen = nominlen
         self.usemarginals = usemarginals
         self.usetvm = usetvm
+        self.dump_data = (dump_vis_path != '')
         self.ngpus = ngpus
         self.pad = tgt_dict.pad()
         self.unk = tgt_dict.unk()
@@ -123,6 +128,10 @@ class SequenceGenerator(object):
         self.match_source_len = match_source_len
         self.no_repeat_ngram_size = no_repeat_ngram_size
         self.cscore = cscore
+
+        if self.dump_data:
+            assert not self.usetvm, 'For visualizaton plz use genbmm for max-marginal computation!'
+            self.data = {'vocab': tgt_dict, 'data': []}
 
         #self.beam_sizes = '9:11:13:17:0'.split(':')
         #self.beam_sizes = self.beam_sizes[:rounds]
@@ -180,6 +189,11 @@ class SequenceGenerator(object):
         ngpus=1,
         **kwargs
     ):
+        if self.dump_data:
+            cur_data = {}
+            cur_data['src'] = sample['net_input']['src_tokens'].cpu()
+            cur_data['id'] = sample['id'].cpu()
+            cur_data['tgt'] = sample['target'].cpu()
         if ngpus > 1:
             import torch.distributed as dist
             dist.barrier() # for fairness of comparison
@@ -312,7 +326,6 @@ class SequenceGenerator(object):
                 offset_end = offset_start + chunk_sizes[rank]
                 offset_length = chunk_sizes[rank]
             if order == 0:
-                beam_size = beam_size
                 if rank < ngpus_use:
                     prev_output_tokens = src_tokens.new(bsz*offset_length, 1).fill_(0)
                     position = torch.arange(offset_start, offset_end).view(1, -1).repeat(bsz, 1) + 2
@@ -379,6 +392,8 @@ class SequenceGenerator(object):
                 else:
                     if rank < ngpus_use:
                         scores, mapping = torch.topk(unigram_probs, beam_size, -1) # bsz, L, K
+                        if self.dump_data:
+                            cur_data['unigram'] = {'tokens': mapping[0].cpu(), 'scores': scores[0].cpu()}
                     if ngpus > 1:
                         g_list = []
                         for r in range(0, ngpus):
@@ -643,7 +658,13 @@ class SequenceGenerator(object):
                                 edge_max_marginals = fb(ngram_probs.transpose(0, 1).contiguous()) # bsz, length-1, K, K
                                 edge_marginals = edge_max_marginals.transpose(0, 1).contiguous() # bsz, length-1, K, K
                             else:
-                                edge_max_marginals = max_marginals(ngram_probs)
+                                if self.dump_data and order == 1: # We need prefix and suffix scores for visualizing \mathcal{X}_2
+                                    edge_max_marginals, prefix_mm, scores_mm, postfix_mm = max_marginals(ngram_probs, get_all=True)
+                                    prefix_mm = prefix_mm.contiguous()
+                                    postfix_mm = postfix_mm.contiguous()
+                                    scores_mm = scores_mm.contiguous()
+                                else:
+                                    edge_max_marginals = max_marginals(ngram_probs)
                                 edge_marginals = edge_max_marginals.contiguous()
 
                             if self.cscore == -9:
@@ -699,6 +720,13 @@ class SequenceGenerator(object):
                         next_words = prev_mapping_last_y_idx[:, 1:, :, 0] # bsz, L-2, K
                         mapping2 = torch.cat([prev_mapping_x_idx, prev_mapping_last_y_idx], -1) # bsz, L-1, K2, 2
                         all_tokens.append(mapping2)
+                        if self.dump_data:
+                            if order == 1:
+                                cur_data['bigram'] = {'tokens': mapping2[0].cpu(), 'scores': scores[0].cpu(), 'marginals': edge_marginals[0].cpu(), 'prefix_mm': prefix_mm[0].cpu(), 'scores_mm': scores_mm[0].cpu(), 'postfix_mm': postfix_mm[0].cpu()}
+                            elif order == 2:
+                                cur_data['trigram'] = {'tokens': mapping2[0].cpu(), 'scores': scores[0].cpu(), 'marginals': edge_marginals[0].cpu()}
+                            elif order == 3:
+                                cur_data['4gram'] = {'tokens': mapping2[0].cpu(), 'scores': scores[0].cpu(), 'marginals': edge_marginals[0].cpu()}
                         #if debug_flag:
                         #    for b in range(bsz):
                         #        k_same = None
@@ -747,6 +775,9 @@ class SequenceGenerator(object):
                         later_token = tokens[:, 1:] # bsz, l
                         later_tokens = tokens_[:, 1:, :, -1].gather(2, later_token.unsqueeze(-1)).squeeze(-1) # bsz, l
                         tokens = torch.cat([first_tokens, later_tokens], 1) # bsz, l+order
+                        if self.dump_data:
+                            cur_data['5gram'] = {'tokens': tokens[0].cpu()}
+                            self.data['data'].append(cur_data)
                         for i in range(bsz):
                             hypo = {
                                 'tokens': tokens[i][tokens[i].ne(1)] if D>0 else tokens[i],
