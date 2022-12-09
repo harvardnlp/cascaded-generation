@@ -17,7 +17,7 @@ import sys
 import random
 
 import numpy as np
-from sacrebleu import compute_bleu, corpus_bleu as _corpus_bleu
+from sacrebleu import corpus_bleu as _corpus_bleu
 
 
 def main():
@@ -108,11 +108,20 @@ def corpus_bleu(sys_stream, ref_streams):
 
 
 def sentence_bleu(hypothesis, reference):
+    try:
+        from sacrebleu.metrics import BLEU
+
+        comp_bleu = BLEU.compute_bleu
+    except ImportError:
+        # Otherwise, we fall back to API version 1.*
+        import sacrebleu
+
+        comp_bleu = sacrebleu.compute_bleu
     bleu = _corpus_bleu(hypothesis, reference)
     for i in range(1, 4):
         bleu.counts[i] += 1
         bleu.totals[i] += 1
-    bleu = compute_bleu(
+    bleu = comp_bleu(
         bleu.counts, bleu.totals,
         bleu.sys_len, bleu.ref_len,
         smooth='exp', smooth_floor=0.0,
