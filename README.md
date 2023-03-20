@@ -258,13 +258,16 @@ CUDA_VISIBLE_DEVICES=0,1,2 python train.py $DATA_BIN --arch $ARCH --share-all-em
 ## Citation
 
 ```
-@misc{deng2020cascaded,
-    title={Cascaded Text Generation with Markov Transformers},
-    author={Yuntian Deng and Alexander M. Rush},
-    year={2020},
-    eprint={2006.01112},
-    archivePrefix={arXiv},
-    primaryClass={cs.CL}
+@inproceedings{NEURIPS2020_01a06836,
+ author = {Deng, Yuntian and Rush, Alexander},
+ booktitle = {Advances in Neural Information Processing Systems},
+ editor = {H. Larochelle and M. Ranzato and R. Hadsell and M.F. Balcan and H. Lin},
+ pages = {170--181},
+ publisher = {Curran Associates, Inc.},
+ title = {Cascaded Text Generation with Markov Transformers},
+ url = {https://proceedings.neurips.cc/paper/2020/file/01a0683665f38d8e5e567b3b15ca98bf-Paper.pdf},
+ volume = {33},
+ year = {2020}
 }
 ```
 
